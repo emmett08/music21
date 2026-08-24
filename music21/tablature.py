@@ -16,6 +16,8 @@ Chord from FretBoard Object with tuning.
 '''
 from __future__ import annotations
 
+import dataclasses
+import math
 import unittest
 
 from music21 import common
@@ -27,6 +29,72 @@ from music21 import prebase
 
 class TablatureException(exceptions21.Music21Exception):
     pass
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class StaffTuning:
+    '''
+    The open-string tuning assigned to one tablature staff line.
+
+    This value preserves MusicXML's line identity and pitch spelling instead
+    of inferring a chord-diagram fretboard.  Accessing :attr:`pitch` returns a
+    new :class:`~music21.pitch.Pitch`, so callers cannot mutate the stored
+    tuning through the derived object.  ``line=None`` can retain a legacy
+    source that omitted the formerly optional line attribute; MusicXML 4
+    export requires a positive line number and will reject that value.
+
+    >>> tuning = tablature.StaffTuning(line=2, step='F', alter=1, octave=3)
+    >>> tuning.pitch
+    <music21.pitch.Pitch F#3>
+    >>> tuning.pitch is tuning.pitch
+    False
+
+    * New in v11.
+
+    AI-assisted.
+    '''
+    line: int|None
+    step: str
+    octave: int
+    alter: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.line is not None:
+            if not isinstance(self.line, int) or isinstance(self.line, bool):
+                raise TypeError('StaffTuning.line must be an integer or None.')
+            if self.line < 1:
+                raise ValueError('StaffTuning.line must be positive.')
+        if (not isinstance(self.step, str)
+                or len(self.step) != 1
+                or self.step not in 'ABCDEFG'):
+            raise ValueError('StaffTuning.step must be one of A through G.')
+        if not isinstance(self.octave, int) or isinstance(self.octave, bool):
+            raise TypeError('StaffTuning.octave must be an integer.')
+        if not 0 <= self.octave <= 9:
+            raise ValueError('StaffTuning.octave must be between 0 and 9.')
+        try:
+            alter = float(self.alter)
+        except (TypeError, ValueError) as exc:
+            raise TypeError('StaffTuning.alter must be numeric.') from exc
+        if not math.isfinite(alter):
+            raise ValueError('StaffTuning.alter must be finite.')
+        object.__setattr__(self, 'alter', alter)
+
+    @property
+    def pitch(self) -> pitch.Pitch:
+        '''
+        Return a new pitch with this tuning's exact step and sounding value.
+
+        MusicXML permits any decimal alteration, including values without a
+        standard accidental name.  Assigning the raw alteration to an
+        :class:`~music21.pitch.Accidental` preserves that source spelling.
+        '''
+        tuningPitch = pitch.Pitch(name=f'{self.step}{self.octave}')
+        if self.alter:
+            tuningAccidental = pitch.Accidental()
+            tuningAccidental.alter = self.alter
+            tuningPitch.accidental = tuningAccidental
+        return tuningPitch
 
 
 class FretNote(prebase.ProtoM21Object):
@@ -351,6 +419,26 @@ class MandolinFretBoard(FretBoard):
 
 
 class Test(unittest.TestCase):
+
+    def testStaffTuningArbitraryAlter(self):
+        '''
+        AI-assisted coverage for unrestricted MusicXML decimal alterations.
+        '''
+        alterToPitchSpace = {
+            0.3: 53.3,
+            -0.3: 52.7,
+            4.5: 57.5,
+            -4.5: 48.5,
+        }
+        for alter, expectedPitchSpace in alterToPitchSpace.items():
+            with self.subTest(alter=alter):
+                tuning = StaffTuning(line=1, step='F', octave=3, alter=alter)
+                tuningPitch = tuning.pitch
+                self.assertEqual(tuningPitch.step, 'F')
+                self.assertEqual(tuningPitch.octave, 3)
+                self.assertIsNotNone(tuningPitch.accidental)
+                self.assertAlmostEqual(tuningPitch.accidental.alter, alter)
+                self.assertAlmostEqual(tuningPitch.ps, expectedPitchSpace)
 
     def testFretNoteString(self):
         f = FretNote(4, 1, 2)

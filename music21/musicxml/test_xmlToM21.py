@@ -9,6 +9,7 @@ from music21 import articulations
 from music21 import bar
 from music21 import chord
 from music21 import common
+from music21 import converter
 from music21 import defaults
 from music21 import duration
 from music21 import dynamics
@@ -863,6 +864,88 @@ class Test(unittest.TestCase):
                 sizes.append(s.staffSize)
         self.assertEqual(sizes, [80.0, 120.0, 80.0])
 
+    def testStaffTuningImport(self):
+        '''
+        AI-assisted regressions for lossless MusicXML staff-tuning import.
+        '''
+        mxDetails = self.EL('''
+            <staff-details>
+              <staff-lines>6</staff-lines>
+              <staff-tuning line="6">
+                <tuning-step>F</tuning-step>
+                <tuning-alter>1</tuning-alter>
+                <tuning-octave>3</tuning-octave>
+              </staff-tuning>
+              <staff-tuning line="1">
+                <tuning-step>B</tuning-step>
+                <tuning-alter>-0.5</tuning-alter>
+                <tuning-octave>1</tuning-octave>
+              </staff-tuning>
+              <staff-tuning>
+                <tuning-step>D</tuning-step>
+                <tuning-octave>2</tuning-octave>
+              </staff-tuning>
+            </staff-details>
+        ''')
+        staffLayout = MeasureParser().xmlStaffLayoutFromStaffDetails(mxDetails)
+        self.assertIsNotNone(staffLayout)
+        staffLayout = t.cast(layout.StaffLayout, staffLayout)
+        self.assertEqual(
+            [(tuning.line, tuning.step, tuning.alter, tuning.octave)
+             for tuning in staffLayout.staffTunings],
+            [(6, 'F', 1.0, 3), (1, 'B', -0.5, 1), (None, 'D', 0.0, 2)],
+        )
+        self.assertEqual(
+            [tuning.pitch.ps for tuning in staffLayout.staffTunings],
+            [54.0, 34.5, 38.0],
+        )
+        self.assertIsNot(
+            staffLayout.staffTunings[0].pitch,
+            staffLayout.staffTunings[0].pitch,
+        )
+
+        emptyLayout = MeasureParser().xmlStaffLayoutFromStaffDetails(
+            self.EL('<staff-details><staff-lines>5</staff-lines></staff-details>')
+        )
+        self.assertIsNotNone(emptyLayout)
+        self.assertEqual(emptyLayout.staffTunings, ())
+
+    def testStaffTuningImportRejectsMalformedEntries(self):
+        '''
+        AI-assisted validation of required MusicXML tuning pitch data.
+        '''
+        malformedTunings = (
+            '<staff-tuning line="1"><tuning-octave>3</tuning-octave></staff-tuning>',
+            '<staff-tuning line="1"><tuning-step>E</tuning-step></staff-tuning>',
+            ('<staff-tuning line="wrong"><tuning-step>E</tuning-step>'
+             '<tuning-octave>3</tuning-octave></staff-tuning>'),
+            ('<staff-tuning line="1"><tuning-step>H</tuning-step>'
+             '<tuning-octave>3</tuning-octave></staff-tuning>'),
+        )
+        for malformedTuning in malformedTunings:
+            with self.subTest(malformedTuning=malformedTuning):
+                mxDetails = self.EL(f'<staff-details>{malformedTuning}</staff-details>')
+                with self.assertRaisesRegex(
+                    MusicXMLImportException,
+                    'staff-tuning entry 1',
+                ):
+                    MeasureParser().xmlStaffLayoutFromStaffDetails(mxDetails)
+
+    def testTabTestImportsStaffTunings(self):
+        '''
+        AI-assisted coverage for the repository's existing guitar fixture.
+        '''
+        from music21 import converter
+        from music21.musicxml import testFiles
+
+        score = converter.parse(testFiles.tabTest)
+        staffLayouts = score[layout.StaffLayout]
+        self.assertEqual(len(staffLayouts), 1)
+        self.assertEqual(
+            [tuning.pitch.nameWithOctave for tuning in staffLayouts[0].staffTunings],
+            ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
+        )
+
     def testCountDynamics(self):
         '''
         good test of both dynamics and a PartStaff.
@@ -1121,7 +1204,6 @@ class Test(unittest.TestCase):
         self.assertEqual(rmIterator[2].style.enclosure, 'square')
 
     def testPedalMarks(self):
-        from music21 import converter
         from music21 import corpus
         from music21.musicxml import testPrimitive
 
@@ -1169,7 +1251,7 @@ class Test(unittest.TestCase):
         self.assertEqual(pm.pedalForm, expressions.PedalForm.Symbol)
         self.assertEqual(pm.pedalType, expressions.PedalType.Sustain)
         spElements = pm.getSpannedElements()
-        self.assertEqual(len(spElements), 2)
+        self.assertEqual(len(spElements), 3)
         self.assertIsInstance(spElements[0], chord.Chord)
         self.assertEqual(
             spElements[0].fullName,
@@ -1179,6 +1261,9 @@ class Test(unittest.TestCase):
         self.assertIsInstance(spElements[1], note.Note)
         self.assertEqual(spElements[1].fullName, 'E-flat in octave 1 Whole Note')
         self.assertEqual(spElements[1].offset, 0.)
+        self.assertEqual(spElements[1].quarterLength, 4.)
+        self.assertIsInstance(spElements[2], spanner.SpannerAnchor)
+        self.assertEqual(spElements[2].offset, 3.)
 
         s = corpus.parse('dichterliebe_no2')
         pedals = list(s[expressions.PedalMark])
@@ -1190,10 +1275,103 @@ class Test(unittest.TestCase):
         spElements = pm.getSpannedElements()
         self.assertEqual(len(spElements), 5)
         expectedOffsets = [1.5, 1.75, 0.0, 0.75, 1.0]
-        for i, (el, expectedOffset) in enumerate(zip(spElements, expectedOffsets)):
+        for el, expectedOffset in zip(spElements, expectedOffsets):
             self.assertIsInstance(el, note.Note)
             self.assertEqual(el.nameWithOctave, 'A3')
             self.assertEqual(el.offset, expectedOffset)
+
+    def testDirectionSpannerEndpointsAreStaffAware(self):
+        s = converter.parseData(r'''
+            <score-partwise version="4.0">
+              <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+              <part id="P1"><measure number="1">
+                <attributes>
+                  <divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+                  <staves>2</staves>
+                  <clef number="1"><sign>G</sign><line>2</line></clef>
+                  <clef number="2"><sign>F</sign><line>4</line></clef>
+                </attributes>
+                <direction><direction-type><wedge type="crescendo" number="1"/></direction-type>
+                  <staff>2</staff></direction>
+                <direction><direction-type><wedge type="diminuendo" number="1"/></direction-type>
+                  <staff>1</staff></direction>
+                <direction><direction-type><wedge type="crescendo" number="2"/></direction-type>
+                  <offset>2</offset><staff>1</staff></direction>
+                <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration>
+                  <voice>1</voice><type>whole</type><staff>1</staff></note>
+                <backup><duration>4</duration></backup>
+                <note><pitch><step>E</step><octave>3</octave></pitch><duration>4</duration>
+                  <voice>2</voice><type>whole</type><staff>2</staff></note>
+                <direction><direction-type><wedge type="stop" number="1"/></direction-type>
+                  <staff>1</staff></direction>
+                <direction><direction-type><wedge type="stop" number="1"/></direction-type>
+                  <staff>2</staff></direction>
+                <direction><direction-type><wedge type="stop" number="2"/></direction-type>
+                  <offset>-1</offset><staff>1</staff></direction>
+              </measure></part>
+            </score-partwise>
+        ''', format='musicxml')
+
+        wedges = list(s[dynamics.DynamicWedge])
+        self.assertEqual(len(wedges), 3)
+        staff1Wedge = next(w for w in wedges
+                           if isinstance(w, dynamics.Diminuendo) and w.idLocal == '1')
+        staff2Wedge = next(w for w in wedges
+                           if isinstance(w, dynamics.Crescendo) and w.idLocal == '1')
+        offsetWedge = next(w for w in wedges if w.idLocal == '2')
+        self.assertEqual(staff1Wedge.getFirst().nameWithOctave, 'C5')
+        self.assertIs(staff1Wedge.getFirst(), staff1Wedge.getLast())
+        self.assertEqual(staff2Wedge.getFirst().nameWithOctave, 'E3')
+        self.assertIs(staff2Wedge.getFirst(), staff2Wedge.getLast())
+        self.assertIsInstance(offsetWedge.getFirst(), spanner.SpannerAnchor)
+        self.assertIsInstance(offsetWedge.getLast(), spanner.SpannerAnchor)
+        self.assertEqual(offsetWedge.getFirst().getOffsetInHierarchy(s), 2.0)
+        self.assertEqual(offsetWedge.getLast().getOffsetInHierarchy(s), 3.0)
+
+    def testDirectionSpannerStopBeforeStartAndPartCleanup(self):
+        s = converter.parseData(r'''
+            <score-partwise version="4.0">
+              <part-list><score-part id="P1"><part-name>Part</part-name></score-part></part-list>
+              <part id="P1">
+                <measure number="1">
+                  <attributes><divisions>1</divisions>
+                    <time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+                  <note><pitch><step>C</step><octave>4</octave></pitch>
+                    <duration>4</duration><type>whole</type></note>
+                  <direction><direction-type><wedge type="stop" number="3"/></direction-type>
+                  </direction>
+                  <backup><duration>4</duration></backup>
+                  <direction><direction-type><wedge type="crescendo" number="3"/></direction-type>
+                  </direction>
+                  <forward><duration>4</duration></forward>
+                </measure>
+                <measure number="2">
+                  <direction><direction-type><wedge type="crescendo" number="4"/></direction-type>
+                  </direction>
+                  <note><pitch><step>D</step><octave>4</octave></pitch>
+                    <duration>4</duration><type>whole</type></note>
+                </measure>
+                <measure number="3">
+                  <note><pitch><step>E</step><octave>4</octave></pitch>
+                    <duration>4</duration><type>whole</type></note>
+                  <direction><direction-type><wedge type="stop" number="4"/></direction-type>
+                  </direction>
+                  <direction><direction-type><wedge type="crescendo" number="5"/></direction-type>
+                  </direction>
+                </measure>
+              </part>
+            </score-partwise>
+        ''', format='musicxml')
+
+        wedges = list(s[dynamics.DynamicWedge])
+        self.assertEqual([w.idLocal for w in wedges], ['3', '4'])
+        stopBeforeStart, crossMeasure = wedges
+        self.assertIsInstance(stopBeforeStart.getFirst(), spanner.SpannerAnchor)
+        self.assertEqual(stopBeforeStart.getFirst().getOffsetInHierarchy(s), 0.0)
+        self.assertEqual(stopBeforeStart.getLast().nameWithOctave, 'C4')
+        self.assertEqual(crossMeasure.getFirst().nameWithOctave, 'D4')
+        self.assertEqual(crossMeasure.getLast().nameWithOctave, 'E4')
+        self.assertEqual(list(s[spanner.SpannerAnchor]), [stopBeforeStart.getFirst()])
 
     def testNoChordImport(self):
         from music21 import converter
@@ -1602,12 +1780,16 @@ class Test(unittest.TestCase):
             [o.placement for o in ottava_objs],
             ['above', 'below', 'above', 'below']
         )
-        self.assertEqual(
-            [[p.nameWithOctave for p in o.getSpannedElements()] for o in ottava_objs],
-            # TODO(bug): first element should be ['C7', 'A6']
-            # not reading <offset>-4</offset>
-            [['A6'], ['C3', 'B2'], ['A5', 'A5'], ['B3', 'C4']]
-        )
+        ottavaPitches = [
+            [getattr(p, 'nameWithOctave', repr(p)) for p in o.getSpannedElements()]
+            for o in ottava_objs
+        ]
+        self.assertEqual(ottavaPitches, [
+            ['<music21.spanner.SpannerAnchor at 0.5>', 'C5'],
+            ['C3'],
+            ['A5', 'A5', '<music21.spanner.SpannerAnchor at 3.125>'],
+            ['B3'],
+        ])
 
     def testClearingTuplets(self):
         from xml.etree.ElementTree import fromstring as EL

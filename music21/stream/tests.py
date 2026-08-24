@@ -5063,6 +5063,61 @@ class Test(unittest.TestCase):
         with self.assertRaises(StreamException):
             s.storeAtEnd(b2)
 
+    def testIsAtEnd(self):
+        '''
+        https://github.com/cuthbertLab/music21/issues/1069
+
+        AI-assisted.
+        '''
+        s = Stream()
+        n = note.Note('C')
+        s.append(n)
+        b = bar.Barline()
+        s.storeAtEnd(b)
+        self.assertTrue(s.isAtEnd(b))
+        self.assertFalse(s.isAtEnd(n))
+
+        # Legacy streams and pickles can retain the pre-enum string value.
+        s.coreSetElementOffset(b, 'highestTime')  # type: ignore[arg-type]
+        self.assertTrue(s.isAtEnd(b))
+
+        ordinaryBarline = bar.Barline()
+        s.insert(s.highestTime, ordinaryBarline)
+        self.assertFalse(s.isAtEnd(ordinaryBarline))
+
+        m = Measure()
+        nM = note.Note('D')
+        m.append(nM)
+        rb = bar.Barline('final')
+        m.storeAtEnd(rb)
+        self.assertTrue(m.isAtEnd(rb))
+        self.assertFalse(m.isAtEnd(nM))
+
+        outsider = note.Note('E')
+        with self.assertRaises(sites.SitesException):
+            s.isAtEnd(outsider)
+
+    def testQuantizeKeepsElementsStoredAtEnd(self):
+        '''
+        Elements stored at the end retain their special position during quantization.
+
+        AI-assisted.
+        '''
+        s = Stream()
+        n = note.Note()
+        n.quarterLength = 0.26
+        s.repeatInsert(n, [0.1, 0.49, 0.9])
+        b = bar.Barline()
+        s.storeAtEnd(b)
+        s.coreSetElementOffset(b, 'highestTime')  # type: ignore[arg-type]
+
+        s.quantize(processOffsets=True, processDurations=True, inPlace=True)
+
+        self.assertTrue(s.isAtEnd(b))
+        self.assertEqual(s.elementOffset(b, returnSpecial=True), 'highestTime')
+        ordinaryOffsets = [s.elementOffset(e) for e in s.elements if not s.isAtEnd(e)]
+        self.assertEqual(ordinaryOffsets, [0.0, 0.5, 1.0])
+
     def testElementsHighestTimeB(self):
         '''
         Test adding elements at the highest time position

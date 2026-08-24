@@ -101,6 +101,9 @@ from music21 import spanner
 from music21 import stream
 from music21.stream.enums import StaffType
 
+if t.TYPE_CHECKING:
+    from music21 import tablature
+
 environLocal = environment.Environment('layout')
 
 
@@ -355,6 +358,14 @@ class StaffLayout(LayoutBase):
             >>> sl.staffType
             <StaffType.CUE: 'cue'>
             ''',
+        'staffTunings': '''
+            The open-string tunings attached to identified tablature staff
+            lines, stored as an immutable tuple of
+            :class:`~music21.tablature.StaffTuning` values.  An empty tuple
+            means that no tuning was supplied.
+
+            * New in v11.
+            ''',
     }
     def __init__(self,
                  *,
@@ -362,6 +373,7 @@ class StaffLayout(LayoutBase):
                  staffNumber: int|float|None = None,
                  staffSize: int|float|None = None,
                  staffLines: int|None = None,
+                 staffTunings: tuple[tablature.StaffTuning, ...] = (),
                  hidden: bool|None = None,
                  staffType: StaffType = StaffType.REGULAR,
                  **keywords):
@@ -372,6 +384,7 @@ class StaffLayout(LayoutBase):
         self.staffNumber = staffNumber
         self.staffSize: float|None = None if staffSize is None else float(staffSize)
         self.staffLines = staffLines
+        self.staffTunings = tuple(staffTunings)
         self.hidden = hidden  # True = hidden; False = shown; None = inherit
         self.staffType: StaffType = staffType
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import copy
 import datetime
+import decimal
 import fractions
 import io
 import math
@@ -7201,7 +7202,10 @@ class MeasureExporter(XMLExporterBase):
 
         return mxMeasureStyle
 
-    def staffLayoutToXmlStaffDetails(self, staffLayout):
+    def staffLayoutToXmlStaffDetails(
+        self,
+        staffLayout: layout.StaffLayout,
+    ) -> Element:
         '''
         Convert a :class:`~music21.layout.StaffLayout` object to a
         <staff-details> element.
@@ -7217,6 +7221,9 @@ class MeasureExporter(XMLExporterBase):
               <staff-type>cue</staff-type>
               <staff-lines>3</staff-lines>
         </staff-details>
+
+        * Changed in v11: Export staff tunings without losing their line IDs
+          or chromatic alterations.  AI-assisted.
         '''
         # TODO: number lines from the bottom and hide others as necessary
         # see: https://github.com/w3c-cg/musicxml/issues/351
@@ -7237,7 +7244,48 @@ class MeasureExporter(XMLExporterBase):
             mxStaffLines = SubElement(mxStaffDetails, 'staff-lines')
             mxStaffLines.text = str(staffLayout.staffLines)
 
-        # TODO: staff-tuning
+        for index, staffTuning in enumerate(staffLayout.staffTunings, start=1):
+            try:
+                line = staffTuning.line
+                step = staffTuning.step
+                alter = float(staffTuning.alter)
+                octave = staffTuning.octave
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise MusicXMLExportException(
+                    f'Invalid staff tuning at position {index}: {exc}'
+                ) from exc
+
+            if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+                raise MusicXMLExportException(
+                    f'Staff tuning at position {index} requires a positive line number.'
+                )
+            if not isinstance(step, str) or len(step) != 1 or step not in 'ABCDEFG':
+                raise MusicXMLExportException(
+                    f'Staff tuning at position {index} has invalid step {step!r}.'
+                )
+            if (not isinstance(octave, int)
+                    or isinstance(octave, bool)
+                    or not 0 <= octave <= 9):
+                raise MusicXMLExportException(
+                    f'Staff tuning at position {index} has invalid octave {octave!r}.'
+                )
+            if not math.isfinite(alter):
+                raise MusicXMLExportException(
+                    f'Staff tuning at position {index} has non-finite alter {alter!r}.'
+                )
+
+            mxStaffTuning = SubElement(mxStaffDetails, 'staff-tuning')
+            mxStaffTuning.set('line', str(line))
+            mxTuningStep = SubElement(mxStaffTuning, 'tuning-step')
+            mxTuningStep.text = step
+            if alter != 0.0:
+                mxTuningAlter = SubElement(mxStaffTuning, 'tuning-alter')
+                alterText = format(decimal.Decimal(str(alter)), 'f')
+                if '.' in alterText:
+                    alterText = alterText.rstrip('0').rstrip('.')
+                mxTuningAlter.text = alterText
+            mxTuningOctave = SubElement(mxStaffTuning, 'tuning-octave')
+            mxTuningOctave.text = str(octave)
         # TODO: capo
         # TODO: staff-size
         return mxStaffDetails
