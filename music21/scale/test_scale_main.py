@@ -286,6 +286,52 @@ class Test(unittest.TestCase):
 
         # TODO(CA): add serial rows as scales
 
+    def testAlteredMinorRelativeScales(self):
+        '''
+        AI-assisted regression tests for altered-minor relative scales.
+        '''
+        alteredMinorScales = (
+            scale.HarmonicMinorScale,
+            scale.MelodicMinorScale,
+            scale.JazzMinorScale,
+        )
+        for scaleClass in alteredMinorScales:
+            with self.subTest(scaleClass=scaleClass.__name__):
+                alteredMinor = scaleClass('a4')
+                self.assertEqual(alteredMinor.getRelativeMajor().tonic.nameWithOctave, 'C5')
+                self.assertEqual(alteredMinor.getRelativeMinor().tonic.nameWithOctave, 'A4')
+
+        self.assertIsInstance(
+            scale.HarmonicMinorScale().abstract,
+            scale.AbstractHarmonicMinorScale,
+        )
+        self.assertIsInstance(
+            scale.MelodicMinorScale().abstract,
+            scale.AbstractMelodicMinorScale,
+        )
+
+    def testJazzMinor(self):
+        '''
+        AI-assisted regression tests for the jazz minor scale.
+        '''
+        jazzMinor = scale.JazzMinorScale('g4')
+        expectedAscending = ['G4', 'A4', 'B-4', 'C5', 'D5', 'E5', 'F#5', 'G5']
+        expectedDescending = list(reversed(expectedAscending))
+
+        self.assertIsInstance(jazzMinor.abstract, scale.AbstractJazzMinorScale)
+        self.assertEqual(
+            [str(p) for p in jazzMinor.getPitches(
+                'g4', 'g5', direction=Direction.ASCENDING
+            )],
+            expectedAscending,
+        )
+        self.assertEqual(
+            [str(p) for p in jazzMinor.getPitches(
+                'g4', 'g5', direction=Direction.DESCENDING
+            )],
+            expectedDescending,
+        )
+
     # # This test does not yet work.
     # def testDeriveByDegreeBiDirectional(self):
     #     sc1 = scale.MelodicMinorScale()

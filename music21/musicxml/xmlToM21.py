@@ -5,13 +5,20 @@
 # Authors:      Michael Scott Asato Cuthbert
 #               Christopher Ariza
 #               Jacob Tyler Walls
+#               Greg Chapman
 #
-# Copyright:    Copyright © 2009-2024 Michael Scott Asato Cuthbert
+# Copyright:    Copyright © 2009-2026 Michael Scott Asato Cuthbert
 # License:      BSD, see license.txt
 # ------------------------------------------------------------------------------
+'''
+Convert MusicXML documents to music21 objects.
+
+AI-assisted: Staff-aware direction-spanner endpoint resolution was repaired with Codex.
+'''
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import fractions
 import io
 import weakref
@@ -75,6 +82,35 @@ environLocal = environment.Environment('musicxml.xmlToM21')
 
 # const
 NO_STAFF_ASSIGNED = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingDirectionSpannerEndpoint:
+    spanner: spanner.Spanner
+    staffKey: int
+    voiceKey: str|int|None
+    offsetInMeasure: OffsetQL
+    isStart: bool
+    parseIndex: int
+
+
+@dataclass(frozen=True, slots=True)
+class _GeneralNoteSpan:
+    element: note.GeneralNote
+    staffKey: int
+    voiceKey: str|int|None
+    startOffset: OffsetQL
+    endOffset: OffsetQL
+    parseIndex: int
+
+
+@dataclass(frozen=True, slots=True)
+class _DeferredDirectionSpannerStop:
+    mxObj: ET.Element
+    staffKey: int|None
+    voiceKey: str|int|None
+    totalOffset: OffsetQL|None
+    parseIndex: int
 
 # see docstring for isRecognizableMetadataKey for information on
 # this list.
@@ -1469,6 +1505,10 @@ class PartParser(XMLParserBase):
             self.partId = ''
         self.parent = parent if parent is not None else MusicXMLImporter()
         self.spannerBundle = self.parent.spannerBundle
+        self.openDirectionSpanners: dict[
+            tuple[str, str|None, int],
+            list[spanner.Spanner],
+        ] = {}
 
         self.stream: stream.Part = stream.Part()
         if self.mxPart is not None:
@@ -1533,6 +1573,27 @@ class PartParser(XMLParserBase):
             self.spannerBundle.remove(sp)
         # s is the score; adding the part to the score
         self.stream.coreElementsChanged()
+
+        # A start without a matching stop must not be confused with a similarly
+        # numbered direction spanner in the following part.  Remove its private
+        # endpoint anchors as well, since they no longer define any surviving object.
+        incompleteDirectionSpanners = {
+            id(openSpanner): openSpanner
+            for matchingSpanners in self.openDirectionSpanners.values()
+            for openSpanner in matchingSpanners
+        }.values()
+        for incompleteSpanner in incompleteDirectionSpanners:
+            for endpoint in incompleteSpanner.getSpannedElements():
+                if not isinstance(endpoint, spanner.SpannerAnchor):
+                    continue
+                self.stream.remove(endpoint, recurse=True)
+                for staffReference in self.staffReferenceList:
+                    for staffObjects in staffReference.values():
+                        if endpoint in staffObjects:
+                            staffObjects.remove(endpoint)
+            if incompleteSpanner in self.spannerBundle:
+                self.spannerBundle.remove(incompleteSpanner)
+        self.openDirectionSpanners.clear()
 
         partStaves: list[stream.PartStaff] = []
         if self.maxStaves > 1:
@@ -1833,6 +1894,7 @@ class PartParser(XMLParserBase):
             'StaffLayout',
             'TempoIndication',
             'TimeSignature',
+            'SpannerAnchor',
         ]
         # spanners generally appear only on the first staff.
         # RepeatBracket spanners, however, need to appear on every staff.
@@ -2405,6 +2467,9 @@ class MeasureParser(XMLParserBase):
 
         self.transposition = None
         self.spannerBundle = self.parent.spannerBundle
+        self._pendingDirectionSpannerEndpoints: list[_PendingDirectionSpannerEndpoint] = []
+        self._directionGeneralNoteSpans: list[_GeneralNoteSpan] = []
+        self._deferredDirectionSpannerStops: list[_DeferredDirectionSpannerStop] = []
         self.staffReference: StaffReferenceType = {}
         self.activeTuplets: list[duration.Tuplet|None] = self.parent.activeTuplets
 
@@ -2646,7 +2711,10 @@ class MeasureParser(XMLParserBase):
         self.addToStaffReference(staffSource, m21Object)
         self.stream.coreInsert(offset, m21Object)
 
-    def parse(self):
+    def parse(self) -> None:
+        if self.mxMeasure is None:
+            return
+
         # handle <print> before anything else, because it can affect
         # attributes!
         for mxPrint in self.mxMeasure.findall('print'):
@@ -2672,11 +2740,217 @@ class MeasureParser(XMLParserBase):
                     v.coreElementsChanged()
         self.stream.coreElementsChanged()
 
+        self._resolveDeferredDirectionSpannerStops()
+        self._resolvePendingDirectionSpannerEndpoints()
+        if self._pendingDirectionSpannerEndpoints:
+            raise MusicXMLImportException('Unresolved direction spanner endpoints remain')
+        self.stream.coreElementsChanged()
+
         if (self.restAndNoteCount['rest'] == 1
                 and self.restAndNoteCount['note'] == 0):
             # TODO: do this on a per-voice basis.
             self.fullMeasureRest = True
             # it might already be True because a rest had a "measure='yes'" attribute
+
+    def _queueDirectionSpannerEndpoint(
+        self,
+        sp: spanner.Spanner,
+        staffKey: int|None,
+        voiceKey: str|int|None,
+        totalOffset: OffsetQL|None,
+        *,
+        isStart: bool,
+        parseIndex: int|None = None,
+    ) -> None:
+        staffKey = staffKey or NO_STAFF_ASSIGNED
+
+        # Keep the historically supported direct-call behavior for clients that call
+        # xmlDirectionTypeToSpanners() without parsing a complete MusicXML measure.
+        if self.mxMeasure is None:
+            if isStart:
+                self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
+            elif self.nLast is not None:
+                sp.addSpannedElements(self.nLast)
+            return
+
+        if totalOffset is None:  # pragma: no cover -- xmlDirection always supplies it
+            totalOffset = self.offsetMeasureNote
+        self._pendingDirectionSpannerEndpoints.append(
+            _PendingDirectionSpannerEndpoint(
+                spanner=sp,
+                staffKey=staffKey,
+                voiceKey=voiceKey,
+                offsetInMeasure=opFrac(totalOffset),
+                isStart=isStart,
+                parseIndex=self.parseIndex if parseIndex is None else parseIndex,
+            )
+        )
+
+    def _deferDirectionSpannerStop(
+        self,
+        mxObj: ET.Element,
+        staffKey: int|None,
+        voiceKey: str|int|None,
+        totalOffset: OffsetQL|None,
+        parseIndex: int,
+    ) -> None:
+        self._deferredDirectionSpannerStops.append(
+            _DeferredDirectionSpannerStop(
+                mxObj, staffKey, voiceKey, totalOffset, parseIndex
+            )
+        )
+
+    def _resolveDeferredDirectionSpannerStops(self) -> None:
+        deferredStops = self._deferredDirectionSpannerStops
+        self._deferredDirectionSpannerStops = []
+        for deferredStop in deferredStops:
+            try:
+                self.xmlDirectionTypeToSpanners(
+                    deferredStop.mxObj,
+                    deferredStop.staffKey,
+                    deferredStop.totalOffset,
+                    deferredStop.voiceKey,
+                    _deferUnmatchedStop=False,
+                    _sourceParseIndex=deferredStop.parseIndex,
+                )
+            except MusicXMLImportException as excep:
+                warnings.warn(
+                    f'Could not import {deferredStop.mxObj.tag}: {excep}',
+                    MusicXMLWarning,
+                    stacklevel=2,
+                )
+
+    def _recordGeneralNoteSpan(
+        self,
+        generalNote: note.GeneralNote,
+        mxNote: ET.Element,
+        startOffset: OffsetQL,
+    ) -> None:
+        voiceKey = self.lastVoice if self.useVoices else None
+        self._directionGeneralNoteSpans.append(
+            _GeneralNoteSpan(
+                element=generalNote,
+                staffKey=self.getStaffNumber(mxNote),
+                voiceKey=voiceKey,
+                startOffset=opFrac(startOffset),
+                endOffset=opFrac(startOffset + generalNote.quarterLength),
+                parseIndex=self.parseIndex,
+            )
+        )
+
+    def _effectiveDirectionStaffKey(self, staffKey: int) -> int:
+        if self.staves == 1 and staffKey in (NO_STAFF_ASSIGNED, 1):
+            return 1
+        return staffKey
+
+    def _directionSpannerKey(
+        self,
+        mxObj: ET.Element,
+        staffKey: int|None,
+    ) -> tuple[str, str|None, int]:
+        return (
+            mxObj.tag,
+            mxObj.get('number'),
+            self._effectiveDirectionStaffKey(staffKey or NO_STAFF_ASSIGNED),
+        )
+
+    def _registerOpenDirectionSpanner(
+        self,
+        mxObj: ET.Element,
+        staffKey: int|None,
+        sp: spanner.Spanner,
+    ) -> None:
+        key = self._directionSpannerKey(mxObj, staffKey)
+        self.parent.openDirectionSpanners.setdefault(key, []).append(sp)
+
+    def _popOpenDirectionSpanner(
+        self,
+        mxObj: ET.Element,
+        staffKey: int|None,
+    ) -> spanner.Spanner|None:
+        key = self._directionSpannerKey(mxObj, staffKey)
+        matchingSpanners = self.parent.openDirectionSpanners.get(key)
+        if not matchingSpanners:
+            return None
+        sp = matchingSpanners.pop(0)
+        if not matchingSpanners:
+            del self.parent.openDirectionSpanners[key]
+        return sp
+
+    def _getOpenDirectionSpanner(
+        self,
+        mxObj: ET.Element,
+        staffKey: int|None,
+    ) -> spanner.Spanner|None:
+        matchingSpanners = self.parent.openDirectionSpanners.get(
+            self._directionSpannerKey(mxObj, staffKey)
+        )
+        if not matchingSpanners:
+            return None
+        return matchingSpanners[0]
+
+    def _generalNoteAtDirectionEndpoint(
+        self,
+        staffKey: int,
+        voiceKey: str|int|None,
+        offsetInMeasure: OffsetQL,
+        parseIndex: int,
+        *,
+        isStart: bool,
+    ) -> note.GeneralNote|None:
+        effectiveStaffKey = self._effectiveDirectionStaffKey(staffKey)
+        candidateSpans: list[_GeneralNoteSpan] = []
+        for generalNoteSpan in self._directionGeneralNoteSpans:
+            if isStart and generalNoteSpan.parseIndex <= parseIndex:
+                continue
+            if not isStart and generalNoteSpan.parseIndex >= parseIndex:
+                continue
+            if self._effectiveDirectionStaffKey(generalNoteSpan.staffKey) != effectiveStaffKey:
+                continue
+            candidateOffset = (
+                generalNoteSpan.startOffset if isStart else generalNoteSpan.endOffset
+            )
+            if candidateOffset == offsetInMeasure:
+                candidateSpans.append(generalNoteSpan)
+
+        if voiceKey is not None:
+            candidateSpans = [
+                candidateSpan
+                for candidateSpan in candidateSpans
+                if str(candidateSpan.voiceKey) == str(voiceKey)
+            ]
+
+        # A direction is staff-wide rather than voice-specific.  Attaching it to one
+        # of several simultaneous notes would be arbitrary, so retain the exact time
+        # with a SpannerAnchor instead.
+        if len(candidateSpans) == 1:
+            return candidateSpans[0].element
+        return None
+
+    def _resolvePendingDirectionSpannerEndpoints(self) -> None:
+        pendingEndpoints = self._pendingDirectionSpannerEndpoints
+        self._pendingDirectionSpannerEndpoints = []
+
+        for pending in pendingEndpoints:
+            endpoint: base.Music21Object|None = self._generalNoteAtDirectionEndpoint(
+                pending.staffKey,
+                pending.voiceKey,
+                pending.offsetInMeasure,
+                pending.parseIndex,
+                isStart=pending.isStart,
+            )
+            if endpoint is None:
+                endpoint = spanner.SpannerAnchor()
+                self.insertCoreAndRef(
+                    pending.offsetInMeasure,
+                    pending.staffKey,
+                    endpoint,
+                )
+
+            if pending.isStart:
+                pending.spanner.insertFirstSpannedElement(endpoint)
+            else:
+                pending.spanner.addSpannedElements(endpoint)
 
     def xmlBackup(self, mxObj: ET.Element):
         '''
@@ -2862,6 +3136,7 @@ class MeasureParser(XMLParserBase):
             self.updateLyricsFromList(generalNote, mxNote.findall('lyric'))
             self.addToStaffReference(mxNote, generalNote)
             self.insertInMeasureOrVoice(mxNote, generalNote)
+            self._recordGeneralNoteSpan(generalNote, mxNote, self.offsetMeasureNote)
             offsetIncrement = generalNote.duration.quarterLength
             self.nLast = generalNote  # update
 
@@ -2869,6 +3144,7 @@ class MeasureParser(XMLParserBase):
         # note either does not exist or is not a chord, we
         # have a complete chord
         if self.mxNoteList and nextNoteIsChord is False:
+            firstChordMxNote = self.mxNoteList[0]
             c = self.xmlToChord(self.mxNoteList)
             # add any accumulated lyrics
             self.updateLyricsFromList(c, self.mxLyricList)
@@ -2880,6 +3156,7 @@ class MeasureParser(XMLParserBase):
                     break
             else:
                 self.insertInMeasureOrVoice(mxNote, c)
+            self._recordGeneralNoteSpan(c, firstChordMxNote, self.offsetMeasureNote)
 
             self.mxNoteList = []  # clear for next chord
             self.mxLyricList = []
@@ -4243,7 +4520,11 @@ class MeasureParser(XMLParserBase):
         self,
         mxObj: ET.Element,
         staffKey: int|None = None,
-        totalOffset: OffsetQL|None = None
+        totalOffset: OffsetQL|None = None,
+        voiceKey: str|int|None = None,
+        *,
+        _deferUnmatchedStop: bool = True,
+        _sourceParseIndex: int|None = None,
     ):
         # noinspection PyShadowingNames
         '''
@@ -4331,7 +4612,6 @@ class MeasureParser(XMLParserBase):
         (<music21.expressions.PedalBounce at 1.0>, <music21.expressions.PedalGapStart at 2.0>,
         <music21.expressions.PedalGapEnd at 3.5>)
         '''
-        targetLast = self.nLast
         returnList = []
 
         if totalOffset is not None:
@@ -4350,22 +4630,35 @@ class MeasureParser(XMLParserBase):
 
             if mType != 'stop':
                 sp = self.xmlOneSpanner(mxObj, None, spClass, allowDuplicateIds=True)
+                self._registerOpenDirectionSpanner(mxObj, staffKey, sp)
+                self._queueDirectionSpannerEndpoint(
+                    sp, staffKey, voiceKey, totalOffset, isStart=True
+                )
                 returnList.append(sp)
-                self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
             else:
-                idFound = mxObj.get('number')
-                spb = self.spannerBundle.getByClassIdLocalComplete(
-                    'DynamicWedge', idFound, False)  # get first
-                try:
-                    sp = spb[0]
-                except IndexError:
+                sp = self._popOpenDirectionSpanner(mxObj, staffKey)
+                if sp is None and _deferUnmatchedStop and self.mxMeasure is not None:
+                    self._deferDirectionSpannerStop(
+                        mxObj,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        self.parseIndex,
+                    )
+                    return returnList
+                if sp is None:
                     raise MusicXMLImportException('Error in getting DynamicWedges')
+                self._queueDirectionSpannerEndpoint(
+                    sp,
+                    staffKey,
+                    voiceKey,
+                    totalOffset,
+                    isStart=False,
+                    parseIndex=_sourceParseIndex,
+                )
                 sp.completeStatus = True
-                # will only have a target if this follows the note
-                if targetLast is not None:
-                    sp.addSpannedElements(targetLast)
 
-        if mxObj.tag in ('bracket', 'dashes'):
+        elif mxObj.tag in ('bracket', 'dashes'):
             mxType = mxObj.get('type')
             idFound = mxObj.get('number')
             if mxType == 'start':
@@ -4382,43 +4675,53 @@ class MeasureParser(XMLParserBase):
                     sp.lineType = mxObj.get('line-type')  # redundant with setLineStyle()
 
                 self.spannerBundle.append(sp)
+                self._registerOpenDirectionSpanner(mxObj, staffKey, sp)
+                self._queueDirectionSpannerEndpoint(
+                    sp, staffKey, voiceKey, totalOffset, isStart=True
+                )
                 returnList.append(sp)
-                # define this spanner as needing component assignment from
-                # the next general note
-                self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
             elif mxType == 'stop':
-                # need to retrieve an existing spanner
-                # try to get base class of both Crescendo and Decrescendo
-                try:
-                    sp = self.spannerBundle.getByClassIdLocalComplete(
-                        'Line', idFound, False)[0]
-                    # get first
-                except IndexError:
+                sp = self._popOpenDirectionSpanner(mxObj, staffKey)
+                if sp is None and _deferUnmatchedStop and self.mxMeasure is not None:
+                    self._deferDirectionSpannerStop(
+                        mxObj,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        self.parseIndex,
+                    )
+                    return returnList
+                if sp is None:
                     warnings.warn(
                         'Line <' + mxObj.tag + '> stop without start',
                         MusicXMLWarning,
                         stacklevel=2,
                     )
                     return []
-                sp.completeStatus = True
+                lineSpanner = t.cast(spanner.Line, sp)
 
                 if mxObj.tag == 'dashes':
-                    sp.endTick = 'none'
-                    sp.lineType = 'dashed'
+                    lineSpanner.endTick = 'none'
+                    lineSpanner.lineType = 'dashed'
                 else:
-                    sp.endTick = mxObj.get('line-end')
+                    lineSpanner.endTick = mxObj.get('line-end')
                     height = mxObj.get('end-length')
                     if height is not None:
-                        sp.endHeight = float(height)
-                    sp.lineType = mxObj.get('line-type')
-
-                # will only have a target if this follows the note
-                if targetLast is not None:
-                    sp.addSpannedElements(targetLast)
+                        lineSpanner.endHeight = float(height)
+                    lineSpanner.lineType = mxObj.get('line-type')
+                self._queueDirectionSpannerEndpoint(
+                    sp,
+                    staffKey,
+                    voiceKey,
+                    totalOffset,
+                    isStart=False,
+                    parseIndex=_sourceParseIndex,
+                )
+                sp.completeStatus = True
             else:
                 raise MusicXMLImportException(f'unidentified mxType of mxBracket: {mxType}')
 
-        if mxObj.tag == 'octave-shift':
+        elif mxObj.tag == 'octave-shift':
             mxType = mxObj.get('type')
             mxSize = mxObj.get('size')
             idFound = mxObj.get('number')
@@ -4438,26 +4741,44 @@ class MeasureParser(XMLParserBase):
                 sp.idLocal = idFound
                 sp.type = (mxSize or 8, m21Type)
                 self.spannerBundle.append(sp)
-                returnList.append(sp)
-                self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
-            elif mxType in ('continue', 'stop'):
-                spb = self.spannerBundle.getByClassIdLocalComplete(
-                    'Ottava', idFound, False  # get first
+                self._registerOpenDirectionSpanner(mxObj, staffKey, sp)
+                self._queueDirectionSpannerEndpoint(
+                    sp, staffKey, voiceKey, totalOffset, isStart=True
                 )
-                try:
-                    sp = spb[0]
-                except IndexError:
+                returnList.append(sp)
+            elif mxType in ('continue', 'stop'):
+                if mxType == 'stop':
+                    sp = self._popOpenDirectionSpanner(mxObj, staffKey)
+                else:
+                    sp = self._getOpenDirectionSpanner(mxObj, staffKey)
+                if (sp is None
+                        and mxType == 'stop'
+                        and _deferUnmatchedStop
+                        and self.mxMeasure is not None):
+                    self._deferDirectionSpannerStop(
+                        mxObj,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        self.parseIndex,
+                    )
+                    return returnList
+                if sp is None:
                     raise MusicXMLImportException('Error in getting Ottava')
-                if mxType == 'continue':
-                    self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
-                else:  # if mxType == 'stop':
+                if mxType == 'stop':
+                    self._queueDirectionSpannerEndpoint(
+                        sp,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        isStart=False,
+                        parseIndex=_sourceParseIndex,
+                    )
                     sp.completeStatus = True
-                    if targetLast is not None:
-                        sp.addSpannedElements(targetLast)
             else:
                 raise MusicXMLImportException(f'unidentified mxType of octave-shift: {mxType}')
 
-        if mxObj.tag == 'pedal':
+        elif mxObj.tag == 'pedal':
             mxType = mxObj.get('type')
             mxAbbreviated = mxObj.get('abbreviated')
             mxLine = mxObj.get('line')  # 'yes'/'no'
@@ -4483,16 +4804,31 @@ class MeasureParser(XMLParserBase):
                     sp.abbreviated = True
 
                 self.spannerBundle.append(sp)
-                returnList.append(sp)
-                self.spannerBundle.setPendingSpannedElementAssignment(sp, 'GeneralNote')
-            elif mxType in ('continue', 'stop', 'discontinue', 'resume', 'change'):
-                spb = self.spannerBundle.getByClassIdLocalComplete(
-                    'PedalMark', idFound, False  # get first
+                self._registerOpenDirectionSpanner(mxObj, staffKey, sp)
+                self._queueDirectionSpannerEndpoint(
+                    sp, staffKey, voiceKey, totalOffset, isStart=True
                 )
-                try:
-                    sp = spb[0]
-                except IndexError:
+                returnList.append(sp)
+            elif mxType in ('continue', 'stop', 'discontinue', 'resume', 'change'):
+                if mxType == 'stop':
+                    sp = self._popOpenDirectionSpanner(mxObj, staffKey)
+                else:
+                    sp = self._getOpenDirectionSpanner(mxObj, staffKey)
+                if (sp is None
+                        and mxType == 'stop'
+                        and _deferUnmatchedStop
+                        and self.mxMeasure is not None):
+                    self._deferDirectionSpannerStop(
+                        mxObj,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        self.parseIndex,
+                    )
+                    return returnList
+                if sp is None:
                     raise MusicXMLImportException('Error in getting PedalMark')
+                pedalSpanner = t.cast(expressions.PedalMark, sp)
                 if mxType == 'continue':
                     # pass?  I don't think I need to remember a continue, and if
                     # someone fills this spanner, we won't know this particular
@@ -4512,9 +4848,9 @@ class MeasureParser(XMLParserBase):
                     # we had a symbol, and now we're starting a line without a downtick;
                     # that is the definition of SymbolLine).
                     pedalStartOffset: OffsetQL|None = self.pedalToStartOffset.get(sp, None)
-                    if (sp.pedalForm == expressions.PedalForm.Symbol
+                    if (pedalSpanner.pedalForm == expressions.PedalForm.Symbol
                             and pedalStartOffset == totalOffset):
-                        sp.pedalForm = expressions.PedalForm.SymbolLine
+                        pedalSpanner.pedalForm = expressions.PedalForm.SymbolLine
                     else:
                         # insert a PedalGapEnd
                         pgEnd = expressions.PedalGapEnd()
@@ -4526,9 +4862,15 @@ class MeasureParser(XMLParserBase):
                     self.insertCoreAndRef(totalOffset, staffKey, pb)
                     sp.addSpannedElements(pb)
                 elif mxType == 'stop':
+                    self._queueDirectionSpannerEndpoint(
+                        sp,
+                        staffKey,
+                        voiceKey,
+                        totalOffset,
+                        isStart=False,
+                        parseIndex=_sourceParseIndex,
+                    )
                     sp.completeStatus = True
-                    if targetLast is not None:
-                        sp.addSpannedElements(targetLast)
             else:
                 raise MusicXMLImportException(f'unidentified mxType of pedal: {mxType}')
 
@@ -4622,16 +4964,23 @@ class MeasureParser(XMLParserBase):
                 su.placement = placement
             self.spannerBundle.append(su)
 
+        if target is None:
+            return su
+
         # add a reference of this note to this spanner
-        if target is not None:
-            su.addSpannedElements(target)
+        typeAttr = mxObj.get('type')
+        if typeAttr in ('start', 'stop'):
+            priorLength = len(su)
+            if typeAttr == 'start':
+                su.insertFirstSpannedElement(target)
+                synchronizeIds(mxObj, su)
+            else:
+                su.addSpannedElements(target)
+            if priorLength == 1:
+                su.completeStatus = True
+                # only add after complete
         # environLocal.printDebug(['adding n', target, id(target), 'su.getSpannedElements',
         #     su.getSpannedElements(), su.getSpannedElementIds()])
-        if mxObj.get('type') == 'stop':
-            su.completeStatus = True
-            # only add after complete
-        elif mxObj.get('type') == 'start':
-            synchronizeIds(mxObj, su)
 
         return su
 
@@ -5504,6 +5853,12 @@ class MeasureParser(XMLParserBase):
         # staffKey is the staff that this direction applies to. not
         # found in mxSpecificDirectionTag (inside direction-type) but in mxDirection itself.
         staffKey = self.getStaffNumber(mxDirection)
+        voiceKey: str|int|None = None
+        if voiceText := strippedText(mxDirection.find('voice')):
+            try:
+                voiceKey = int(voiceText)
+            except ValueError:
+                voiceKey = voiceText
 
         metronome_added = False
         # editorial (footnote, level, voice) for the whole <direction> tag is parsed in
@@ -5514,7 +5869,8 @@ class MeasureParser(XMLParserBase):
                 self.setDirectionInDirectionType(mxSpecificDirectionTag,
                                                  mxDirection,
                                                  staffKey,
-                                                 totalOffset)
+                                                 totalOffset,
+                                                 voiceKey)
                 if mxSpecificDirectionTag.tag == 'metronome':
                     metronome_added = True
 
@@ -5539,6 +5895,7 @@ class MeasureParser(XMLParserBase):
         mxDirection: ET.Element,
         staffKey: int,
         totalOffset: float,
+        voiceKey: str|int|None = None,
     ):
         # TODO: pedal
         # TODO: harp-pedals
@@ -5563,7 +5920,7 @@ class MeasureParser(XMLParserBase):
         elif tag in ('wedge', 'bracket', 'dashes', 'octave-shift', 'pedal'):
             try:
                 spannerList = self.xmlDirectionTypeToSpanners(
-                    mxDir, staffKey, totalOffset
+                    mxDir, staffKey, totalOffset, voiceKey
                 )
             except MusicXMLImportException as excep:
                 warnings.warn(f'Could not import {tag}: {excep}', MusicXMLWarning, stacklevel=2)
@@ -6389,6 +6746,9 @@ class MeasureParser(XMLParserBase):
         >>> MP.xmlStaffLayoutFromStaffDetails(mxDetails2, m21staffLayout=stl)
         >>> stl.staffType
         <StaffType.CUE: 'cue'>
+
+        * Changed in v11: Preserve staff tunings, including source line IDs
+          and chromatic alterations.  AI-assisted.
         '''
         seta = _setAttributeFromTagText
         stl: layout.StaffLayout
@@ -6424,7 +6784,39 @@ class MeasureParser(XMLParserBase):
                     MusicXMLWarning,
                     stacklevel=2,
                 )
-        # TODO: staff-tuning*
+        mxStaffTunings = mxDetails.findall('staff-tuning')
+        if mxStaffTunings:
+            staffTunings: list[tablature.StaffTuning] = []
+            for index, mxStaffTuning in enumerate(mxStaffTunings, start=1):
+                lineText = mxStaffTuning.get('line')
+                stepText = strippedText(mxStaffTuning.find('tuning-step'))
+                alterText = strippedText(mxStaffTuning.find('tuning-alter'))
+                octaveText = strippedText(mxStaffTuning.find('tuning-octave'))
+
+                missingElements = []
+                if not stepText:
+                    missingElements.append('tuning-step')
+                if not octaveText:
+                    missingElements.append('tuning-octave')
+                if missingElements:
+                    missing = ', '.join(missingElements)
+                    raise MusicXMLImportException(
+                        f'staff-tuning entry {index} is missing required {missing}.'
+                    )
+
+                try:
+                    staffTuning = tablature.StaffTuning(
+                        line=None if lineText is None else int(lineText),
+                        step=stepText,
+                        alter=0.0 if not alterText else float(alterText),
+                        octave=int(octaveText),
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise MusicXMLImportException(
+                        f'Invalid staff-tuning entry {index} (line={lineText!r}): {exc}'
+                    ) from exc
+                staffTunings.append(staffTuning)
+            stl.staffTunings = tuple(staffTunings)
         # TODO: capo
         seta(stl, mxDetails, 'staff-size', transform=_floatOrIntStr)
         # TODO: musicxml 4: staff-size has a scaling attribute for the notation

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import fractions
 import textwrap
+import typing as t
 import unittest
 
 from music21 import bar
@@ -24,6 +25,44 @@ from music21 import prebase
 from music21 import roman
 from music21 import romanText
 from music21 import stream
+
+
+# ------------------------------------------------------------------------------
+
+def _romanTextTimeSignatureToken(timeSignature: meter.TimeSignature) -> str:
+    '''
+    Return a RomanText time-signature token without losing slow/fast grouping.
+
+    RomanText can represent two beat interpretations for simple meters whose
+    numerators are divisible by three.  The prefix is emitted explicitly so a
+    later parser does not have to guess which interpretation was intended.
+
+    Additive meters retain their ratio spelling because RomanText has no
+    equivalent slow/fast prefix for their component groupings.
+
+    * New in v11.
+
+    AI-assisted.
+    '''
+    ratioString = timeSignature.ratioString
+    if '+' in ratioString or timeSignature.numerator % 3:
+        return ratioString
+
+    denominatorBeatQL = fractions.Fraction(4, timeSignature.denominator)
+    beatDurationQL = timeSignature.beatDuration.quarterLength
+    if (timeSignature.beatCount == timeSignature.numerator
+            and beatDurationQL == denominatorBeatQL):
+        prefix = 'slow'
+    elif (timeSignature.beatCount * 3 == timeSignature.numerator
+          and beatDurationQL == denominatorBeatQL * 3):
+        prefix = 'fast'
+    else:
+        raise romanText.rtObjects.RomanTextException(
+            'RomanText cannot represent the beat grouping for '
+            f'{ratioString}: {timeSignature.beatCount} beats of {beatDurationQL} quarter lengths.'
+        )
+
+    return f'{prefix} {ratioString}'
 
 
 # ------------------------------------------------------------------------------
@@ -268,7 +307,9 @@ class RnWriter(prebase.ProtoM21Object):
         The line before that gives the time signature change:
 
         >>> testCase.combinedList[-2]
-        'Time Signature: 3/4'
+        'Time Signature: slow 3/4'
+
+        * Changed in v11: Explicitly serialise slow and fast beat groupings.
 
         '''
 
@@ -279,7 +320,8 @@ class RnWriter(prebase.ProtoM21Object):
             tsThisMeasure = thisMeasure.getElementsByClass(meter.TimeSignature)
             if tsThisMeasure:
                 firstTS = tsThisMeasure[0]
-                self.combinedList.append(f'Time Signature: {firstTS.ratioString}')
+                tsToken = _romanTextTimeSignatureToken(firstTS)
+                self.combinedList.append(f'Time Signature: {tsToken}')
                 if len(tsThisMeasure) > 1:
                     unprocessedTSs = [x.ratioString for x in tsThisMeasure[1:]]
                     msg = f'further time signature change(s) unprocessed: {unprocessedTSs}'
@@ -621,6 +663,63 @@ class Test(unittest.TestCase):
         s = converter.parse(rntxt, format='romanText')
         writer = RnWriter(s)
         self.assertTrue('\n'.join(writer.combinedList).strip().endswith(rntxt.strip()))
+
+    def testTimeSignatureGroupingRoundTrip(self) -> None:
+        from music21 import converter
+
+        groupedMeters = (
+            'slow 3/8', 'fast 3/8',
+            'slow 6/8', 'fast 6/8',
+            'slow 9/8', 'fast 9/8',
+            'slow 12/8', 'fast 12/8',
+            'slow 3/16', 'fast 3/16',
+            'slow 3/4', 'fast 3/4',
+            'slow 3/2', 'fast 3/2',
+        )
+        for groupedMeter in groupedMeters:
+            with self.subTest(groupedMeter=groupedMeter):
+                source = f'Time Signature: {groupedMeter}\nm1 C: I'
+                parsedResult = converter.parse(source, format='romanText')
+                self.assertIsInstance(parsedResult, stream.Score)
+                parsed = t.cast(stream.Score, parsedResult)
+                sourceMeasure = parsed.parts[0].measure(1)
+                self.assertIsNotNone(sourceMeasure)
+                sourceMeasure = t.cast(stream.Measure, sourceMeasure)
+                sourceTs = t.cast(meter.TimeSignature, sourceMeasure.timeSignature)
+                self.assertIsInstance(sourceTs, meter.TimeSignature)
+
+                writer = RnWriter(parsed)
+                tsHeader = f'Time Signature: {groupedMeter}'
+                self.assertIn(tsHeader, writer.combinedList)
+
+                reparsedResult = converter.parse(
+                    '\n'.join(writer.combinedList),
+                    format='romanText',
+                )
+                self.assertIsInstance(reparsedResult, stream.Score)
+                reparsed = t.cast(stream.Score, reparsedResult)
+                reparsedMeasure = reparsed.parts[0].measure(1)
+                self.assertIsNotNone(reparsedMeasure)
+                reparsedMeasure = t.cast(stream.Measure, reparsedMeasure)
+                reparsedTs = t.cast(meter.TimeSignature, reparsedMeasure.timeSignature)
+                self.assertIsInstance(reparsedTs, meter.TimeSignature)
+                self.assertEqual(reparsedTs.ratioString, sourceTs.ratioString)
+                self.assertEqual(reparsedTs.beatCount, sourceTs.beatCount)
+                self.assertEqual(
+                    reparsedTs.beatDuration.quarterLength,
+                    sourceTs.beatDuration.quarterLength,
+                )
+
+        additiveTs = meter.TimeSignature('2/8+3/8')
+        self.assertEqual(_romanTextTimeSignatureToken(additiveTs), '2/8+3/8')
+
+        unsupportedTs = meter.TimeSignature('6/8')
+        unsupportedTs.beatCount = 3
+        with self.assertRaisesRegex(
+            romanText.rtObjects.RomanTextException,
+            'cannot represent the beat grouping',
+        ):
+            _romanTextTimeSignatureToken(unsupportedTs)
 
     def testRnString(self) -> None:
         test = rnString(1, 1, 'G: I')

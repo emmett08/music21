@@ -1537,14 +1537,15 @@ class Test(unittest.TestCase):
         from io import StringIO
         from music21 import converter
 
-        rntxt = textwrap.dedent('''
+        sourceText = textwrap.dedent('''
             Time Signature: 3/4
             m1 C: I
         ''')
-        s = converter.parse(rntxt, format='romanText')
+        expectedText = sourceText.replace('Time Signature: 3/4', 'Time Signature: slow 3/4')
+        s = converter.parse(sourceText, format='romanText')
         text_stream = StringIO()
         s.write('romanText', text_stream)
-        self.assertTrue(text_stream.getvalue().endswith(rntxt))
+        self.assertTrue(text_stream.getvalue().endswith(expectedText))
 
 class TestExternal(unittest.TestCase):
     show = True

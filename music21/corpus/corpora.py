@@ -804,7 +804,8 @@ class LocalCorpus(Corpus):
         Add a directory path to a local corpus:
 
         >>> localCorpus = corpus.corpora.LocalCorpus('a new corpus')
-        >>> localCorpus.addPath('~/Desktop')
+        >>> corpusPath = common.getCorpusFilePath()
+        >>> localCorpus.addPath(corpusPath)
 
         Paths added in this way will not be persisted from session to session
         unless explicitly saved by a call to ``LocalCorpus.save()``.
@@ -886,15 +887,16 @@ class LocalCorpus(Corpus):
         corpus, it will be removed permanently.
 
         >>> testCorpus = corpus.corpora.LocalCorpus(name='test')
-        >>> testCorpus.addPath('~/Desktop')
+        >>> corpusPath = common.getCorpusFilePath()
+        >>> testCorpus.addPath(corpusPath)
         >>> len(testCorpus.directoryPaths)
         1
-        >>> testCorpus.removePath('~/Desktop')
+        >>> testCorpus.removePath(corpusPath)
         >>> testCorpus.directoryPaths
         ()
 
         TODO: test for corpus persisted to disk without actually reindexing
-        files on user's Desktop.
+        files in a user directory.
         '''
         temporaryPaths: set[pathlib.Path] = LocalCorpus._temporaryLocalPaths.get(
             self.name, set())

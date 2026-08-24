@@ -28,12 +28,13 @@ from music21 import repeat
 from music21 import spanner
 from music21 import stream
 from music21 import style
+from music21 import tablature
 from music21 import tempo
 
 from music21.musicxml import helpers
 from music21.musicxml import testPrimitive
 from music21.musicxml.m21ToXml import (
-    GeneralObjectExporter, ScoreExporter,
+    GeneralObjectExporter, MeasureExporter, ScoreExporter,
     MusicXMLWarning, MusicXMLExportException
 )
 from music21.musicxml.xmlToM21 import MeasureParser
@@ -80,6 +81,70 @@ class Test(unittest.TestCase):
         with self.assertRaises(MusicXMLExportException) as error:
             s.write()
         self.assertEqual(str(error.exception), msg)
+
+    def testStaffTuningExportAndRoundTrip(self):
+        '''
+        AI-assisted regressions for schema-shaped, lossless staff-tuning export.
+        '''
+        staffTunings = (
+            tablature.StaffTuning(line=6, step='F', alter=1, octave=3),
+            tablature.StaffTuning(line=1, step='B', alter=-0.5, octave=1),
+            tablature.StaffTuning(line=3, step='G', alter=4.5, octave=2),
+            tablature.StaffTuning(line=4, step='C', alter=0.000002, octave=4),
+            tablature.StaffTuning(line=5, step='D', alter=1.0000001, octave=4),
+        )
+        staffLayout = layout.StaffLayout(staffLines=6, staffTunings=staffTunings)
+        mxDetails = MeasureExporter().staffLayoutToXmlStaffDetails(staffLayout)
+        mxTunings = mxDetails.findall('staff-tuning')
+
+        self.assertEqual(
+            [mxTuning.get('line') for mxTuning in mxTunings],
+            ['6', '1', '3', '4', '5'],
+        )
+        self.assertEqual(
+            [mxTuning.findtext('tuning-step') for mxTuning in mxTunings],
+            ['F', 'B', 'G', 'C', 'D'],
+        )
+        self.assertEqual(
+            [mxTuning.findtext('tuning-alter') for mxTuning in mxTunings],
+            ['1', '-0.5', '4.5', '0.000002', '1.0000001'],
+        )
+        self.assertEqual(
+            [mxTuning.findtext('tuning-octave') for mxTuning in mxTunings],
+            ['3', '1', '2', '4', '4'],
+        )
+        self.assertEqual(
+            [child.tag for child in mxTunings[0]],
+            ['tuning-step', 'tuning-alter', 'tuning-octave'],
+        )
+
+        reparsedLayout = MeasureParser().xmlStaffLayoutFromStaffDetails(mxDetails)
+        self.assertIsNotNone(reparsedLayout)
+        self.assertEqual(reparsedLayout.staffTunings, staffTunings)
+
+        missingLineLayout = layout.StaffLayout(staffTunings=(
+            tablature.StaffTuning(line=None, step='E', octave=2),
+        ))
+        with self.assertRaisesRegex(MusicXMLExportException, 'positive line number'):
+            MeasureExporter().staffLayoutToXmlStaffDetails(missingLineLayout)
+
+    def testTabTestExportsStaffTunings(self):
+        '''
+        AI-assisted full-path regression for the existing guitar fixture.
+        '''
+        from music21.musicxml import testFiles
+
+        score = converter.parse(testFiles.tabTest)
+        xmlOut = self.getXml(score)
+        mxScore = et_fromstring(xmlOut)
+        mxTunings = mxScore.findall('.//staff-tuning')
+        self.assertEqual(len(mxTunings), 6)
+        self.assertEqual(
+            [(mxTuning.get('line'), mxTuning.findtext('tuning-step'),
+              mxTuning.findtext('tuning-octave')) for mxTuning in mxTunings],
+            [('1', 'E', '2'), ('2', 'A', '2'), ('3', 'D', '3'),
+             ('4', 'G', '3'), ('5', 'B', '3'), ('6', 'E', '4')],
+        )
 
     def testSpannersWrite(self):
         p = converter.parse("tinynotation: 4/4 c4 d e f g a b c' b a g2")
