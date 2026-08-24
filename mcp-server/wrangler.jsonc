@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "music21-mcp",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-08-24",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "Music21Container",
+      "image": "../Dockerfile.mcp",
+      "instance_type": "basic",
+      "max_instances": 1,
+      "name": "music21-api"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Music21Container",
+        "name": "MUSIC21_CONTAINER"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Music21Container"],
+      "tag": "v1"
+    }
+  ],
+  "secrets": {
+    "required": [
+      "ACCESS_AUTHORIZATION_URL",
+      "ACCESS_CLIENT_ID",
+      "ACCESS_CLIENT_SECRET",
+      "ACCESS_ISSUER",
+      "ACCESS_JWKS_URL",
+      "ACCESS_TOKEN_URL",
+      "ALLOWED_EMAILS"
+    ]
+  }
+}

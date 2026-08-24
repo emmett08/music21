@@ -1,0 +1,54 @@
+# Cloudflare Container image for the private music21 MCP backend.
+# This Dockerfile was written with AI assistance.
+
+FROM python:3.12.14-slim-bookworm AS music21-builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build/music21
+COPY pyproject.toml README.md LICENSE ./
+COPY music21 ./music21
+
+# The v1 service has no corpus API.  Keep Python package code, but omit the
+# bundled corpus data and its unrelated distribution footprint from the image.
+RUN find music21/corpus -type f ! -name '*.py' -delete \
+    && python -m pip wheel --no-deps --wheel-dir /wheels /build/music21
+
+
+FROM python:3.12.14-slim-bookworm
+
+ARG LILYPOND_DEBIAN_VERSION=2.24.1-2
+
+ENV MUSIC21_MCP_LILYPOND=/usr/bin/lilypond \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        "lilypond=${LILYPOND_DEBIAN_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY mcp-server/backend/requirements.txt /tmp/music21-mcp-requirements.txt
+COPY --from=music21-builder /wheels/music21-*.whl /tmp/music21.whl
+
+RUN python -m pip install --no-compile \
+        --requirement /tmp/music21-mcp-requirements.txt \
+        /tmp/music21.whl \
+    && rm /tmp/music21-mcp-requirements.txt /tmp/music21.whl \
+    && groupadd --gid 10001 music21 \
+    && useradd --uid 10001 --gid music21 --create-home --shell /usr/sbin/nologin music21
+
+WORKDIR /srv/music21-mcp
+COPY --chown=music21:music21 mcp-server/backend ./backend
+
+USER music21
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+
+CMD ["python", "-m", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
