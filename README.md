@@ -32,6 +32,8 @@ version of Python that Google Colab runs on (as of 2026, that is Python 3.12).
 
 [Module Documentation](https://www.music21.org/music21docs/moduleReference/index.html)
 
+[Deploy the bounded music21 MCP server](mcp-server/README.md)
+
 ## Mailing list ##
 
 See: https://groups.google.com/forum/#!forum/music21list

@@ -1,0 +1,112 @@
+name: MCP server
+
+on:
+    pull_request:
+        paths:
+            - '.github/workflows/mcp-server.yml'
+            - '.dockerignore'
+            - 'Dockerfile.mcp'
+            - 'mcp-server/**'
+            - 'music21/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+    push:
+        branches:
+            - master
+        paths:
+            - '.github/workflows/mcp-server.yml'
+            - '.dockerignore'
+            - 'Dockerfile.mcp'
+            - 'mcp-server/**'
+            - 'music21/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+
+permissions:
+    contents: read
+
+concurrency:
+    group: mcp-server-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    backend:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  enable-cache: true
+                  cache-dependency-glob: |
+                      pyproject.toml
+                      uv.lock
+                      mcp-server/backend/requirements.txt
+            - name: Install dependencies
+              run: |
+                  uv sync --locked
+                  uv pip install --requirement mcp-server/backend/requirements.txt
+            - name: Test backend
+              run: uv run pytest mcp-server/backend/tests
+            - name: Lint backend
+              run: uv run ruff check mcp-server/backend
+            - name: Type-check backend
+              run: uv run mypy mcp-server/backend
+
+    worker:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: mcp-server
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+                  cache: npm
+                  cache-dependency-path: mcp-server/package-lock.json
+            - name: Install dependencies
+              run: npm ci --ignore-scripts --no-audit --no-fund
+            - name: Test Worker
+              run: npm test
+            - name: Type-check Worker
+              run: npm run typecheck
+            - name: Validate Wrangler configuration and bundle
+              run: >-
+                  npx --no-install wrangler deploy --dry-run
+                  --containers-rollout none --outdir /tmp/music21-mcp-worker
+
+    container:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Build Linux/AMD64 image
+              run: docker build --platform linux/amd64 --file Dockerfile.mcp --tag music21-mcp:test .
+            - name: Exercise container health and parsing
+              run: |
+                  docker run --detach --name music21-mcp-test --publish 8080:8080 music21-mcp:test
+                  trap 'docker logs music21-mcp-test; docker rm --force music21-mcp-test' EXIT
+                  ready=false
+                  for attempt in $(seq 1 60); do
+                      if curl --fail --silent http://127.0.0.1:8080/health >/tmp/health.json; then
+                          ready=true
+                          break
+                      fi
+                      test "$(docker inspect --format '{{.State.Running}}' music21-mcp-test)" = true
+                      sleep 2
+                  done
+                  test "$ready" = true
+                  python -c 'import json; data=json.load(open("/tmp/health.json")); assert data["ok"] is True; assert data["data"]["lilypond"]["available"] is True'
+                  curl --fail --silent \
+                      --header 'Content-Type: application/json' \
+                      --data '{"source":"tinyNotation: 4/4 C4 D4 E4 F4","inputFormat":"tiny_notation"}' \
+                      http://127.0.0.1:8080/v1/inspect >/tmp/inspect.json
+                  python -c 'import json; data=json.load(open("/tmp/inspect.json")); assert data["ok"] is True; assert data["data"]["noteCount"] == 4'
+                  curl --fail --silent \
+                      --header 'Content-Type: application/json' \
+                      --data '{"source":"tinyNotation: 4/4 C4 D4 E4 F4","inputFormat":"tiny_notation","outputFormat":"svg"}' \
+                      http://127.0.0.1:8080/v1/render >/tmp/render.json
+                  python -c 'import json; data=json.load(open("/tmp/render.json")); assert data["ok"] is True; assert data["data"]["pageCount"] >= 1; artifact=data["data"]["artifacts"][0]; assert artifact["contentType"] == "image/svg+xml"; assert "<svg" in artifact["content"]'

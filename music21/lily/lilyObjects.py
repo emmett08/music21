@@ -260,14 +260,22 @@ class LyObject(prebase.ProtoM21Object):
     def quoteString(self, stringIn: str) -> str:
         r'''
         returns a string that is quoted with
-        internal quotation marks backslash'd out
+        internal backslashes and quotation marks escaped
         and an extra space at the end.
 
         >>> m = lily.lilyObjects.LyObject()
         >>> print(m.quoteString(r'Hello "there"!'))
         "Hello \"there\"!"
+        >>> print(m.quoteString('C:\\scores\\"draft"'))
+        "C:\\scores\\\"draft\""
+
+        * Changed in v11: Backslashes are escaped before quotation marks so
+          caller-supplied text cannot terminate the LilyPond string.
         '''
-        stringNew = stringIn.replace('"', r'\"')
+        # Escape the escape character first.  Reversing this order would also
+        # escape the backslashes introduced for quotation marks.
+        stringNew = stringIn.replace('\\', r'\\')
+        stringNew = stringNew.replace('"', r'\"')
         return '"' + stringNew + '" '
 
     # noinspection GrazieInspection
@@ -2398,4 +2406,3 @@ class Test(unittest.TestCase):
 if __name__ == '__main__':
     import music21
     music21.mainTest(Test)
-

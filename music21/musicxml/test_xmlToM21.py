@@ -129,7 +129,6 @@ class Test(unittest.TestCase):
         # s.show()
 
     def testVoices(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.voiceDouble)
@@ -146,7 +145,6 @@ class Test(unittest.TestCase):
         # s.show()
 
     def testSlurInputA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.spannersSlurs33c)
@@ -160,7 +158,6 @@ class Test(unittest.TestCase):
         # s.show()
 
     def testMultipleStavesPerPartA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.pianoStaff43a)
@@ -179,7 +176,6 @@ class Test(unittest.TestCase):
         self.assertIsNot(keySigs[0], keySigs[1])
 
     def testMultipleStavesPerPartB(self):
-        from music21 import converter
         from music21.musicxml import testFiles
 
         s = converter.parse(testFiles.moussorgskyPromenade)
@@ -208,7 +204,6 @@ class Test(unittest.TestCase):
 
 
     def testMultipleStavesInPartWithBarline(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
         s = converter.parse(testPrimitive.mixedVoices1a)
         self.assertEqual(len(s.getElementsByClass(stream.PartStaff)), 2)
@@ -219,7 +214,6 @@ class Test(unittest.TestCase):
         self.assertEqual(lastOffset, 'highestTime')
 
     def testMultipleStavesInPartWithOttava(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
         s = converter.parse(testPrimitive.pianoStaffWithOttava)
         self.assertEqual(len(s.getElementsByClass(stream.PartStaff)), 2)
@@ -239,7 +233,6 @@ class Test(unittest.TestCase):
         )
 
     def testSpannersA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.spanners33a)
@@ -261,7 +254,6 @@ class Test(unittest.TestCase):
         # slide on measure 18 (= music21 Glissando)
 
     def testTextExpressionsA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.textExpressions)
@@ -334,7 +326,6 @@ class Test(unittest.TestCase):
     def testImportRepeatExpressionsA(self):
         # test importing from musicxml
         from music21.musicxml import testPrimitive
-        from music21 import converter
 
         # has one segno
         s = converter.parse(testPrimitive.repeatExpressionsA)
@@ -368,7 +359,6 @@ class Test(unittest.TestCase):
         # testing problematic voice imports
 
         from music21.musicxml import testPrimitive
-        from music21 import converter
         # this 2 part segments was importing multiple voices within
         # a measure, even though there was no data in the second voice
         s = converter.parse(testPrimitive.mixedVoices1a)
@@ -404,7 +394,6 @@ class Test(unittest.TestCase):
 
     def testImportMetronomeMarksA(self):
         from music21.musicxml import testPrimitive
-        from music21 import converter
         # has metronome marks defined, not with sound tag
         s = converter.parse(testPrimitive.metronomeMarks31c)
         # get all tempo indications
@@ -436,7 +425,6 @@ class Test(unittest.TestCase):
     def testImportGraceNotesA(self):
         # test importing from musicxml
         from music21.musicxml import testPrimitive
-        from music21 import converter
         unused_s = converter.parse(testPrimitive.graceNotes24a)
 
         # s.show()
@@ -446,7 +434,6 @@ class Test(unittest.TestCase):
         # unless all chord members are without stems.
         # MuseScore 2.0.3 -- last <stem> tag rules.
         from music21.musicxml import m21ToXml
-        from music21 import converter
 
         # this also tests the EXPORTING of stem directions on notes within chords
         n1 = note.Note('f3')
@@ -471,7 +458,6 @@ class Test(unittest.TestCase):
 
     def testStaffGroupsA(self):
         from music21.musicxml import testPrimitive
-        from music21 import converter
 
         s = converter.parse(testPrimitive.staffGroupsNested41d)
         staffGroups = s.getElementsByClass(layout.StaffGroup)
@@ -490,7 +476,6 @@ class Test(unittest.TestCase):
 
     def testStaffGroupsPiano(self):
         from music21.musicxml import testPrimitive
-        from music21 import converter
 
         s = converter.parse(testPrimitive.pianoStaff43a)
         sgs = s.getElementsByClass(layout.StaffGroup)
@@ -501,7 +486,6 @@ class Test(unittest.TestCase):
 
     def testInstrumentTranspositionA(self):
         from music21.musicxml import testPrimitive
-        from music21 import converter
 
         s = converter.parse(testPrimitive.transposingInstruments72a)
         i1 = s.parts[0].flatten().getElementsByClass(instrument.Instrument).first()
@@ -513,7 +497,6 @@ class Test(unittest.TestCase):
 
     def testInstrumentTranspositionB(self):
         from music21.musicxml import testPrimitive
-        from music21 import converter
 
         s = converter.parse(testPrimitive.transposing01)
         # three parts
@@ -581,7 +564,6 @@ class Test(unittest.TestCase):
 
     def testInstrumentTranspositionC(self):
         # generate all transpositions on output
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.transposing01)
@@ -622,7 +604,6 @@ class Test(unittest.TestCase):
         # s.show()
 
     def x_testOrnamentAndTechnical(self):
-        from music21 import converter
         beethoven = common.getCorpusFilePath() + '/beethoven/opus133.mxl'
         # TODO: this is way too long. Lots of hidden 32nd notes for trills.
         s = converter.parse(beethoven, format='musicxml')
@@ -644,7 +625,6 @@ class Test(unittest.TestCase):
         self.assertEqual(countTechnical, 1)
 
     def testOrnamentC(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         # has many ornaments
@@ -702,7 +682,6 @@ class Test(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def testTextBoxA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.textBoxes01)
@@ -734,7 +713,6 @@ class Test(unittest.TestCase):
         # environLocal.printDebug(['n2', n2, 'id(n2)', id(n2), slurs[0].getSpannedElementIds()])
 
     def testImportWedgeA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.spanners33a)
@@ -742,7 +720,6 @@ class Test(unittest.TestCase):
         self.assertEqual(len(s[dynamics.Diminuendo]), 1)
 
     def testImportWedgeB(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         # this produces a single component cresc
@@ -750,7 +727,6 @@ class Test(unittest.TestCase):
         self.assertEqual(len(s[dynamics.Crescendo]), 2)
 
     def testBracketImportB(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.spanners33a)
@@ -758,14 +734,12 @@ class Test(unittest.TestCase):
         self.assertEqual(len(s[spanner.Line]), 6)
 
     def testTrillExtensionImportA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
         s = converter.parse(testPrimitive.notations32a)
         # s.show()
         self.assertEqual(len(s[expressions.TrillExtension]), 2)
 
     def testGlissandoImportA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
         s = converter.parse(testPrimitive.spanners33a)
         # s.show()
@@ -776,14 +750,12 @@ class Test(unittest.TestCase):
 
     def testImportDashes(self):
         # dashes are imported as Lines (as are brackets)
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.spanners33a, format='musicxml')
         self.assertEqual(len(s[spanner.Line]), 6)
 
     def testImportGraceA(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.graceNotes24a)
@@ -935,7 +907,6 @@ class Test(unittest.TestCase):
         '''
         AI-assisted coverage for the repository's existing guitar fixture.
         '''
-        from music21 import converter
         from music21.musicxml import testFiles
 
         score = converter.parse(testFiles.tabTest)
@@ -965,7 +936,6 @@ class Test(unittest.TestCase):
         self.assertEqual(pCount, 97)
 
     def testTrillOnOneNote(self):
-        from music21 import converter
         thisDir = common.getSourceFilePath() / 'musicxml'
         testFp = thisDir / 'testTrillOnOneNote.xml'
         c = converter.parse(testFp)  # , forceSource=True)
@@ -1154,7 +1124,6 @@ class Test(unittest.TestCase):
         )
 
     def testImpliedTuplet(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.tupletsImplied)
@@ -1190,7 +1159,6 @@ class Test(unittest.TestCase):
         self.assertEqual(r.fullMeasure, 'auto')
 
     def testRehearsalMarks(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.directions31a)
@@ -1374,7 +1342,6 @@ class Test(unittest.TestCase):
         self.assertEqual(list(s[spanner.SpannerAnchor]), [stopBeforeStart.getFirst()])
 
     def testNoChordImport(self):
-        from music21 import converter
 
         thisDir = common.getSourceFilePath() / 'musicxml'
         testFp = thisDir / 'testNC.xml'
@@ -1408,7 +1375,6 @@ class Test(unittest.TestCase):
         self.assertEqual(cs.chordKind, 'minor-major-seventh')
 
     def testChordOffset(self):
-        from music21 import converter
 
         thisDir = common.getSourceFilePath() / 'musicxml'
         testFp = thisDir / 'testChordOffset.xml'
@@ -1462,7 +1428,6 @@ class Test(unittest.TestCase):
         self.assertEqual(line.endHeight, 12.5)
 
     def testStringIndication(self):
-        from music21 import converter
 
         thisDir = common.getSourceFilePath() / 'musicxml'
         testFp = thisDir / 'testTab.xml'
@@ -1483,7 +1448,6 @@ class Test(unittest.TestCase):
         self.assertEqual(notes[3].articulations[0].number, 2)
 
     def testArticulationsOnChord(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.multipleFingeringsOnChord)
@@ -1491,7 +1455,6 @@ class Test(unittest.TestCase):
         self.assertEqual(len(c.articulations), 3)
 
     def testFretIndication(self):
-        from music21 import converter
 
         thisDir = common.getSourceFilePath() / 'musicxml'
         testFp = thisDir / 'testTab.xml'
@@ -1512,7 +1475,6 @@ class Test(unittest.TestCase):
         self.assertEqual(notes[3].articulations[1].number, 3)
 
     def testArpeggioMarks(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = converter.parse(testPrimitive.arpeggio32d)
@@ -1553,7 +1515,6 @@ class Test(unittest.TestCase):
                     gnote_index += 1
 
     def testArpeggioMarkSpanners(self) -> None:
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         s = t.cast(stream.Score, converter.parse(testPrimitive.multiStaffArpeggios))
@@ -1570,7 +1531,6 @@ class Test(unittest.TestCase):
             self.assertIs(spanned, ch)
 
     def testHiddenRests(self):
-        from music21 import converter
         from music21 import corpus
         from music21.musicxml import testPrimitive
 
@@ -1631,7 +1591,6 @@ class Test(unittest.TestCase):
         self.assertEqual(MP.stream.voices[1].id, 'non-integer-value')
 
     def testMultiDigitEnding(self):
-        from music21 import converter
         from music21.musicxml import testPrimitive
 
         # Relevant barlines:
@@ -1667,7 +1626,6 @@ class Test(unittest.TestCase):
         '''
         Tests multiple lyrics in same note but with same number (not stanza change)
         '''
-        from music21 import converter
 
         xmlDir = common.getSourceFilePath() / 'musicxml' / 'lilypondTestSuite'
         fp = xmlDir / '61l-Lyrics-Elisions-Syllables.xml'
@@ -1709,7 +1667,6 @@ class Test(unittest.TestCase):
         self.assertEqual(len(s.lyrics(recurse=True)[1][0]), 4)
 
     def testDirectionPosition(self):
-        from music21 import converter
         from music21 import corpus
         from music21.musicxml import testPrimitive, testFiles
 
@@ -1752,7 +1709,6 @@ class Test(unittest.TestCase):
         self.assertEqual(metro.placement, 'above')
 
     def testImportOttava(self):
-        from music21 import converter
 
         xml_dir = common.getSourceFilePath() / 'musicxml' / 'lilypondTestSuite'
         s = converter.parse(xml_dir / '33d-Spanners-OctaveShifts.xml')
@@ -1838,7 +1794,6 @@ class Test(unittest.TestCase):
         self.assertEqual(unp.percMapPitch, 69)
 
     def testImportImplicitMeasureNumber(self):
-        from music21 import converter
 
         xml_dir = common.getSourceFilePath() / 'musicxml' / 'lilypondTestSuite'
         s = converter.parse(xml_dir / '46d-PickupMeasure-ImplicitMeasures.xml')
@@ -1875,7 +1830,6 @@ class Test(unittest.TestCase):
         self.assertEqual(pp.lastMeasureOffset, 25.0)
 
     def testPianoStaffWithRepeatEndings(self):
-        from music21 import converter
         from music21.musicxml import testFiles
 
         s = converter.parse(testFiles.pianoRepeatEndings)

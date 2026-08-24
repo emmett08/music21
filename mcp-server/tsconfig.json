@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": ["@cloudflare/workers-types"],
+    "verbatimModuleSyntax": true
+  },
+  "exclude": ["src/**/*.test.ts"],
+  "include": ["src/**/*.ts"]
+}

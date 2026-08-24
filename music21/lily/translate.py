@@ -21,8 +21,10 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import typing as t
 import unittest
+from unittest import mock
 
 from music21 import base
 from music21 import chord
@@ -46,6 +48,8 @@ from music21 import variant
 from music21.lily import lilyObjects as lyo
 
 environLocal = environment.Environment('lily.translate')
+
+_LILYPOND_RUN_TIMEOUT_SECONDS = 120
 
 try:
     if find_spec('PIL.Image') and find_spec('PIL.ImageOps'):
@@ -192,11 +196,11 @@ class LilypondConverter:
                 if not os.path.exists(LILYEXEC):
                     LILYEXEC = 'lilypond'
             elif platform == 'win' and os.path.exists('c:/Program Files (x86)'):
-                LILYEXEC = r'c:/Program\ Files\ (x86)/lilypond/usr/bin/lilypond'
+                LILYEXEC = 'c:/Program Files (x86)/lilypond/usr/bin/lilypond'
                 if not os.path.exists(LILYEXEC) and not os.path.exists(LILYEXEC + '.exe'):
                     LILYEXEC = 'lilypond'
             elif platform == 'win':
-                LILYEXEC = r'c:/Program\ Files/lilypond/usr/bin/lilypond'
+                LILYEXEC = 'c:/Program Files/lilypond/usr/bin/lilypond'
                 if not os.path.exists(LILYEXEC) and not os.path.exists(LILYEXEC + '.exe'):
                     LILYEXEC = 'lilypond'
             else:
@@ -797,7 +801,10 @@ class LilypondConverter:
         elif el.text is None:
             text = ''
         else:
-            text = '"' + el.text + '"'
+            # Lyric text is caller-controlled for parsed MusicXML and ABC data.
+            # Use the shared LilyPond string encoder rather than assembling a
+            # quoted string directly.  This security correction is AI-assisted.
+            text = self.topLevelObject.quoteString(el.text).rstrip()
             # TODO: composite
             if el.syllabic == 'end':
                 text = text + '__'
@@ -1291,8 +1298,9 @@ class LilypondConverter:
         if noteOrRest.hasStyleInformation:
             if noteOrRest.style.color and noteOrRest.style.hideObjectOnPrint is False:
                 # LilyPond 2.22 (January 2021) supports hex values
-                noteheadColor = rf'\override NoteHead.color = "{noteOrRest.style.color}"' + '\n'
-                stemColor = rf'\override Stem.color = "{noteOrRest.style.color}"' + '\n'
+                quotedColor = self.topLevelObject.quoteString(noteOrRest.style.color).rstrip()
+                noteheadColor = rf'\override NoteHead.color = {quotedColor}' + '\n'
+                stemColor = rf'\override Stem.color = {quotedColor}' + '\n'
                 simpleElementParts.append(noteheadColor)
                 simpleElementParts.append(stemColor)
 
@@ -2488,6 +2496,11 @@ class LilypondConverter:
         If skipWriting is True and a fileName is given then it will run
         that file through lilypond instead
 
+        * Changed in v11: LilyPond is invoked without a command shell. Process failures
+          and timeouts now raise :class:`LilyTranslateException` directly.
+
+        This subprocess-safety update is AI-assisted.
+
         '''
         LILYEXEC = self.findLilyExec()
         if fileName is None:
@@ -2496,19 +2509,38 @@ class LilypondConverter:
             if skipWriting is False:
                 fileName = self.writeLyFile(ext='ly', fp=fileName)
 
-        lilyCommand = '"' + LILYEXEC + '" '
+        lilyCommand = [LILYEXEC]
         if format is not None:
-            lilyCommand += '-f ' + format + ' '
+            lilyCommand.extend(['-f', format])
         if backend is not None:
-            lilyCommand += self.backendString + backend + ' '
+            lilyCommand.append(self.backendString + backend)
 
-        lilyCommand += '-o ' + str(fileName) + ' ' + str(fileName)
-        os.system(lilyCommand)
-
+        lilyCommand.extend(['-o', str(fileName), str(fileName)])
+        platform = common.getPlatform()
+        creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if platform == 'win' else 0
         try:
-            os.remove(str(fileName) + '.eps')
-        except OSError:
-            pass
+            subprocess.run(
+                lilyCommand,
+                check=True,
+                creationflags=creation_flags,
+                shell=False,
+                timeout=_LILYPOND_RUN_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise LilyTranslateException(
+                f'LilyPond did not finish within {_LILYPOND_RUN_TIMEOUT_SECONDS} seconds.'
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise LilyTranslateException(
+                f'LilyPond exited with status {exc.returncode} while creating {format} output.'
+            ) from exc
+        except OSError as exc:
+            raise LilyTranslateException('LilyPond could not be started.') from exc
+        finally:
+            try:
+                os.remove(str(fileName) + '.eps')
+            except OSError:
+                pass
         fileForm = str(fileName) + '.' + format
         if not os.path.exists(fileForm):
             # cannot find full path; try current directory
@@ -2613,7 +2645,96 @@ class LilyTranslateException(exceptions21.Music21Exception):
 
 
 class Test(unittest.TestCase):
-    pass
+    '''
+    Unit tests for LilyPond translation.
+
+    The subprocess-safety regression tests are AI-assisted.
+    '''
+
+    def testRunThroughLilyUsesArgumentVector(self):
+        lpc = LilypondConverter.__new__(LilypondConverter)
+        lpc.backendString = '-dbackend='
+        lilyExec = 'C:/Program Files/LilyPond;not-a-command/lilypond.exe'
+
+        with tempfile.TemporaryDirectory() as tempDir:
+            lilyFile = pathlib.Path(tempDir) / 'score name;$(not-a-command).ly'
+            outputFile = pathlib.Path(f'{lilyFile}.svg')
+            outputFile.touch()
+            with (
+                mock.patch.object(lpc, 'findLilyExec', return_value=lilyExec),
+                mock.patch.object(common, 'getPlatform', return_value='win'),
+                mock.patch.object(subprocess, 'CREATE_NO_WINDOW', 512, create=True),
+                mock.patch.object(subprocess, 'run') as mockRun,
+            ):
+                returnedFile = lpc.runThroughLily(
+                    format='svg',
+                    backend='svg',
+                    fileName=lilyFile,
+                    skipWriting=True,
+                )
+
+        self.assertEqual(returnedFile, outputFile)
+        mockRun.assert_called_once_with(
+            [
+                lilyExec,
+                '-f',
+                'svg',
+                '-dbackend=svg',
+                '-o',
+                str(lilyFile),
+                str(lilyFile),
+            ],
+            check=True,
+            creationflags=512,
+            shell=False,
+            timeout=_LILYPOND_RUN_TIMEOUT_SECONDS,
+        )
+
+    def testRunThroughLilyReportsProcessErrors(self):
+        lpc = LilypondConverter.__new__(LilypondConverter)
+        lpc.backendString = '-dbackend='
+        lilyFile = pathlib.Path('input score.ly')
+        failureCases = (
+            (
+                subprocess.TimeoutExpired(['lilypond'], _LILYPOND_RUN_TIMEOUT_SECONDS),
+                'did not finish within 120 seconds',
+            ),
+            (
+                subprocess.CalledProcessError(2, ['lilypond']),
+                'exited with status 2',
+            ),
+            (OSError('not found'), 'could not be started'),
+        )
+
+        for raisedError, expectedMessage in failureCases:
+            with self.subTest(raisedError=raisedError):
+                with (
+                    mock.patch.object(lpc, 'findLilyExec', return_value='lilypond'),
+                    mock.patch.object(common, 'getPlatform', return_value='nix'),
+                    mock.patch.object(subprocess, 'run', side_effect=raisedError),
+                    self.assertRaisesRegex(LilyTranslateException, expectedMessage),
+                ):
+                    lpc.runThroughLily(
+                        format='svg',
+                        backend='svg',
+                        fileName=lilyFile,
+                        skipWriting=True,
+                    )
+
+    def testCallerTextIsEscapedInLilypondStrings(self):
+        lpc = LilypondConverter()
+        unsafeText = r'"" #(error "MCP_PROBE") \\include'
+        m21Lyric = note.Lyric(text=unsafeText)
+
+        lyricOutput = str(lpc.lyLyricElementFromM21Lyric(m21Lyric))
+        colouredNote = note.Note('C4')
+        colouredNote.style.color = unsafeText
+        colourOutput = str(lpc.lySimpleMusicFromNoteOrRest(colouredNote))
+
+        expectedQuotedText = lpc.topLevelObject.quoteString(unsafeText).rstrip()
+        self.assertEqual(lyricOutput, expectedQuotedText + ' ')
+        self.assertIn(rf'NoteHead.color = {expectedQuotedText}', colourOutput)
+        self.assertIn(rf'Stem.color = {expectedQuotedText}', colourOutput)
 
     def testExplicitConvertChorale(self):
         lpc = LilypondConverter()
@@ -2737,4 +2858,3 @@ if __name__ == '__main__':
     import music21
     music21.mainTest(Test)  # , TestExternal)
     # music21.mainTest(TestExternal, 'noDocTest')
-
