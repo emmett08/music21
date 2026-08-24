@@ -89,12 +89,16 @@ jobs:
               run: |
                   docker run --detach --name music21-mcp-test --publish 8080:8080 music21-mcp:test
                   trap 'docker logs music21-mcp-test; docker rm --force music21-mcp-test' EXIT
+                  ready=false
                   for attempt in $(seq 1 60); do
                       if curl --fail --silent http://127.0.0.1:8080/health >/tmp/health.json; then
+                          ready=true
                           break
                       fi
+                      test "$(docker inspect --format '{{.State.Running}}' music21-mcp-test)" = true
                       sleep 2
                   done
+                  test "$ready" = true
                   python -c 'import json; data=json.load(open("/tmp/health.json")); assert data["ok"] is True; assert data["data"]["lilypond"]["available"] is True'
                   curl --fail --silent \
                       --header 'Content-Type: application/json' \

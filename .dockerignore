@@ -10,6 +10,5 @@
 **/*.pyc
 dist
 documentation
-music21/test
 mcp-server/node_modules
 mcp-server/backend/tests
