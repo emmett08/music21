@@ -33,12 +33,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY mcp-server/backend/requirements.txt /tmp/music21-mcp-requirements.txt
-COPY --from=music21-builder /wheels/music21-*.whl /tmp/music21.whl
+COPY --from=music21-builder /wheels/music21-*.whl /tmp/
 
 RUN python -m pip install --no-compile \
         --requirement /tmp/music21-mcp-requirements.txt \
-        /tmp/music21.whl \
-    && rm /tmp/music21-mcp-requirements.txt /tmp/music21.whl \
+        /tmp/music21-*.whl \
+    && rm /tmp/music21-mcp-requirements.txt /tmp/music21-*.whl \
     && groupadd --gid 10001 music21 \
     && useradd --uid 10001 --gid music21 --create-home --shell /usr/sbin/nologin music21
 

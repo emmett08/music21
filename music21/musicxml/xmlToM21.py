@@ -2860,21 +2860,21 @@ class MeasureParser(XMLParserBase):
         staffKey: int|None,
         sp: spanner.Spanner,
     ) -> None:
-        key = self._directionSpannerKey(mxObj, staffKey)
-        self.parent.openDirectionSpanners.setdefault(key, []).append(sp)
+        spannerKey = self._directionSpannerKey(mxObj, staffKey)
+        self.parent.openDirectionSpanners.setdefault(spannerKey, []).append(sp)
 
     def _popOpenDirectionSpanner(
         self,
         mxObj: ET.Element,
         staffKey: int|None,
     ) -> spanner.Spanner|None:
-        key = self._directionSpannerKey(mxObj, staffKey)
-        matchingSpanners = self.parent.openDirectionSpanners.get(key)
+        spannerKey = self._directionSpannerKey(mxObj, staffKey)
+        matchingSpanners = self.parent.openDirectionSpanners.get(spannerKey)
         if not matchingSpanners:
             return None
         sp = matchingSpanners.pop(0)
         if not matchingSpanners:
-            del self.parent.openDirectionSpanners[key]
+            del self.parent.openDirectionSpanners[spannerKey]
         return sp
 
     def _getOpenDirectionSpanner(
