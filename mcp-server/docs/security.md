@@ -29,7 +29,13 @@ public use.
 - Backslashes and quotation marks from score text are escaped by the music21 LilyPond
   formatter. Before execution, the backend strips strings/comments for inspection and rejects
   generated file directives or active Scheme outside a small finite allow-list.
-- Generated files are read only from the temporary directory and are size-limited.
+- Audio rendering accepts only `wav` or `mp3`. FluidSynth and FFmpeg receive fixed argument
+  vectors, server-owned temporary paths and a server-selected soundfont. Callers cannot select
+  a codec, filter, executable, device or soundfont.
+- Every notation and audio subprocess has a hard timeout. Standard output and diagnostics are
+  discarded rather than returned to callers.
+- Generated files are read only from the temporary directory, must be regular files and are
+  size-limited before their contents are read.
 - Container storage is ephemeral and each request removes its temporary files.
 
 ## Operational controls
@@ -37,8 +43,11 @@ public use.
 - Keep `ALLOWED_EMAILS` to the smallest possible list.
 - Store all OAuth values with `wrangler secret put`; never use committed variables for secrets.
 - Enable Cloudflare observability, but do not log score source or generated artefacts.
-- Keep the container at one instance until memory and LilyPond concurrency have been measured.
-- Review dependency and base-image updates before deployment.
+- Keep the container at one instance until memory, LilyPond and audio-rendering concurrency
+  have been measured.
+- Review dependency, soundfont and base-image updates before deployment.
+- Retain the soundfont licence notice described in [audio.md](audio.md) with redistributed
+  generated audio.
 
 Cloudflare Access policy is the first identity gate. `ALLOWED_EMAILS` is an independent second
 gate, so a broad Access policy does not silently grant MCP tool access.
