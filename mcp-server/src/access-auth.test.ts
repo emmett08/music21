@@ -201,10 +201,14 @@ test("renders escaped consent metadata with a hardened CSRF cookie", async () =>
 
   assert.equal(fixture.response.status, 200);
   assert.match(fixture.response.headers.get("content-type") ?? "", /^text\/html/);
+  const csp = fixture.response.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /style-src 'unsafe-inline'/);
   assert.match(
-    fixture.response.headers.get("content-security-policy") ?? "",
-    /default-src 'none'/,
+    csp,
+    /form-action 'self' https:\/\/access\.example\.test https:\/\/client\.example\.test/,
   );
+  assert.match(fixture.html, /<style>/);
   assert.match(fixture.html, /&lt;Music &amp; Theory&gt;/);
   assert.match(fixture.html, /music:read&amp;write/);
   assert.doesNotMatch(fixture.html, /<script/i);

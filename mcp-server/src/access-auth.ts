@@ -83,7 +83,7 @@ export const accessAuthHandler: ExportedHandler<Env> = {
 
     try {
       if (url.pathname === "/authorize" && request.method === "GET") {
-        return await showAuthorizationConsent(request, env);
+        return await showAuthorizationConsent(request, env, config);
       }
       if (url.pathname === "/authorize" && request.method === "POST") {
         return await handleAuthorizationConsent(request, env, config);
@@ -120,6 +120,7 @@ export function allowedEmailSet(value: string): ReadonlySet<string> {
 async function showAuthorizationConsent(
   request: Request,
   env: OAuthEnvironment,
+  config: AuthConfig,
 ): Promise<Response> {
   if (byteLength(request.url) > MAX_AUTHORIZE_URL_BYTES) {
     return jsonResponse({ error: "request_too_large", ok: false }, 414);
@@ -161,7 +162,14 @@ async function showAuthorizationConsent(
   };
   await putBoundedState(env, `${CONSENT_STATE_PREFIX}${consentState}`, stored);
 
-  return consentPageResponse(clientName, oauthRequest.scope, consentState, csrfToken);
+  return consentPageResponse(
+    clientName,
+    oauthRequest.scope,
+    consentState,
+    csrfToken,
+    config.authorizationUrl.origin,
+    new URL(oauthRequest.redirectUri).origin,
+  );
 }
 
 async function handleAuthorizationConsent(
@@ -452,17 +460,54 @@ function consentPageResponse(
   scopes: readonly string[],
   consentState: string,
   csrfToken: string,
+  accessOrigin: string,
+  clientOrigin: string,
 ): Response {
   const scopeItems = scopes.length > 0
     ? scopes.map((scope) => `<li><code>${escapeHtml(scope)}</code></li>`).join("")
     : "<li>No additional scopes requested</li>";
   const escapedName = escapeHtml(clientName);
+  const formAction = consentFormAction(accessOrigin, clientOrigin);
   const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Authorize ${escapedName}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      color: #111827;
+      background: #f3f4f6;
+    }
+    main {
+      max-width: 36rem;
+      margin: 3rem auto;
+      padding: 1.75rem;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+    }
+    h1 { margin: 0 0 0.75rem; font-size: 1.5rem; }
+    h2 { margin: 1.5rem 0 0.5rem; font-size: 1rem; }
+    p, li { color: #374151; }
+    code {
+      font: 0.9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    form { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+    button {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 0.5rem;
+      padding: 0.6rem 1rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    button[value="approve"] { color: #fff; background: #111827; }
+    button[value="deny"] { color: #111827; background: #fff; border-color: #d1d5db; }
+  </style>
 </head>
 <body>
   <main>
@@ -482,7 +527,8 @@ function consentPageResponse(
   return new Response(html, {
     headers: {
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      "Content-Security-Policy":
+        `default-src 'none'; base-uri 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'`,
       "Content-Type": "text/html; charset=utf-8",
       "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
       "Referrer-Policy": "no-referrer",
@@ -492,6 +538,14 @@ function consentPageResponse(
     },
     status: 200,
   });
+}
+
+function consentFormAction(accessOrigin: string, clientOrigin: string): string {
+  const origins = ["'self'", accessOrigin];
+  if (clientOrigin !== accessOrigin) {
+    origins.push(clientOrigin);
+  }
+  return origins.join(" ");
 }
 
 async function readBoundedForm(request: Request): Promise<URLSearchParams> {
