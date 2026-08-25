@@ -22,6 +22,9 @@ FROM python:3.12.14-slim-bookworm
 ARG LILYPOND_DEBIAN_VERSION=2.24.1-2
 
 ENV MUSIC21_MCP_LILYPOND=/usr/bin/lilypond \
+    MUSIC21_MCP_FLUIDSYNTH=/usr/bin/fluidsynth \
+    MUSIC21_MCP_FFMPEG=/usr/bin/ffmpeg \
+    MUSIC21_MCP_SOUNDFONT=/usr/share/sounds/music21-mcp.sf3 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -29,7 +32,14 @@ ENV MUSIC21_MCP_LILYPOND=/usr/bin/lilypond \
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
+        ffmpeg \
+        fluidsynth \
         "lilypond=${LILYPOND_DEBIAN_VERSION}" \
+        musescore-general-soundfont \
+    && soundfont="$(find /usr/share/sounds/sf3 -maxdepth 1 -type f -name '*.sf3' \
+        | sort | head -n 1)" \
+    && test -n "$soundfont" \
+    && ln -s "$soundfont" /usr/share/sounds/music21-mcp.sf3 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY mcp-server/backend/requirements.txt /tmp/music21-mcp-requirements.txt
