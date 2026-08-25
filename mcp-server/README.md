@@ -54,8 +54,10 @@ local development.
 
 ## Deploy
 
-Follow [the Cloudflare deployment guide](docs/cloudflare.md). Do not expose `/mcp` without
-OAuth, and do not put Cloudflare or Access secrets in this repository.
+Follow [the Cloudflare deployment guide](docs/cloudflare.md). Copy `mcp-server/.env.example`
+to `mcp-server/.env`, then run `npm run cf:configure-access`, `npm run cf:sync-secrets` and
+`npm run cf:deploy` from `mcp-server/`. Do not expose `/mcp` without OAuth, and do not put
+Cloudflare or Access secrets in this repository.
 
 Deployment is intentionally not automatic from pull requests: it requires an authenticated
 Cloudflare account, a Workers Paid plan and the account-specific Access application values.

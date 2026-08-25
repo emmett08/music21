@@ -3,21 +3,16 @@
 This service needs a Worker plus a Linux/AMD64 Cloudflare Container. A plain JavaScript or
 Python Worker cannot host the complete music21 and LilyPond runtime.
 
-## 1. Create the Access application
+## 1. Fill in `mcp-server/.env`
 
-In Cloudflare Zero Trust, create an Access SaaS application using OIDC. Set its callback URL
-to:
+Copy `mcp-server/.env.example` to `mcp-server/.env`. The file is gitignored. The same
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` names used by the EARL MCP delivery
+`.env` work here; Wrangler also reads those from the process environment.
 
-```text
-https://music21-mcp.<your-workers-subdomain>.workers.dev/callback
-```
-
-Permit the `openid`, `email` and `profile` scopes, ensure the ID token contains the `email`
-claim, and create an Access policy allowing only the intended identity. Record the client ID,
-client secret, authorisation endpoint, token endpoint, JWKS endpoint and issuer exactly as
-shown in the application's OIDC discovery/configuration data. The upstream Access refresh
-token is not needed: this Worker validates the returned ID token, discards the upstream token
-response and issues its own MCP credentials.
+Set `MUSIC21_MCP_PUBLIC_BASE_URL` to the public Worker URL, usually
+`https://music21-mcp.<your-workers-subdomain>.workers.dev`, and put the allowed identities
+in `ALLOWED_EMAILS`. After the first deploy you can leave the Access OIDC fields empty and
+let `npm run cf:configure-access` write them back.
 
 ## 2. Install Wrangler and authenticate
 
@@ -33,18 +28,20 @@ Wrangler releases automatically provision the namespace on the first deployment.
 resource provisioning is disabled for the account, create the namespace explicitly with
 `npx wrangler kv namespace create OAUTH_KV` and add the returned ID to that binding.
 
-## 3. Store secrets
+`wrangler.jsonc` sets `image_build_context` to the repository root so `Dockerfile.mcp` can
+copy `music21/` and `pyproject.toml` when Wrangler builds from this directory.
 
-Set each value interactively so it is not written to shell history or committed files:
+## 3. Create the Access application and store secrets
+
+`npm run cf:configure-access` creates or updates an Access SaaS OIDC application whose
+callback is `${MUSIC21_MCP_PUBLIC_BASE_URL}/callback`, then writes `ACCESS_*` into `.env`.
+The upstream Access refresh token is not needed: this Worker validates the returned ID
+token, discards the upstream token response and issues its own MCP credentials.
 
 ```bash
-npx wrangler secret put ACCESS_CLIENT_ID
-npx wrangler secret put ACCESS_CLIENT_SECRET
-npx wrangler secret put ACCESS_AUTHORIZATION_URL
-npx wrangler secret put ACCESS_TOKEN_URL
-npx wrangler secret put ACCESS_JWKS_URL
-npx wrangler secret put ACCESS_ISSUER
-npx wrangler secret put ALLOWED_EMAILS
+npm run cf:configure-access
+npm run cf:sync-secrets:dry-run
+npm run cf:sync-secrets
 ```
 
 `ACCESS_ISSUER` must exactly match the `iss` value in the Access ID token. `ALLOWED_EMAILS`
@@ -59,8 +56,9 @@ registered MCP clients expire after 90 days. Those durations are set explicitly 
 ```bash
 npm test
 npm run typecheck
+npm run cf:sync-secrets:dry-run
 npx wrangler deploy --dry-run --containers-rollout none
-npx wrangler deploy
+npm run cf:deploy
 npx wrangler containers list
 npx wrangler containers images list
 curl --fail https://music21-mcp.<your-workers-subdomain>.workers.dev/health
