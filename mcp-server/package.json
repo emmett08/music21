@@ -7,9 +7,13 @@
     "node": ">=24"
   },
   "scripts": {
-    "deploy": "wrangler deploy",
+    "cf:configure-access": "node ./scripts/configure-access.mjs",
+    "cf:deploy": "node ./scripts/deploy.mjs deploy",
+    "cf:sync-secrets": "node ./scripts/publish-secrets.mjs",
+    "cf:sync-secrets:dry-run": "node ./scripts/publish-secrets.mjs --dry-run",
+    "deploy": "node ./scripts/deploy.mjs deploy",
     "dev": "wrangler dev",
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts scripts/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

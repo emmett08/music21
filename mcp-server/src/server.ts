@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 
-import { accessAuthHandler, allowedEmailSet } from "./access-auth.ts";
+import { accessAuthHandler, allowedEmailSet, hasMcpAuthorizationScope } from "./access-auth.ts";
 import {
   BackendError,
   callBackend,
@@ -370,7 +370,7 @@ function requireAllowedIdentity(env: Env, hasMcpScope: boolean): void {
 const apiHandler = {
   fetch(request, env, context): Promise<Response> {
     const handler = createMcpHandler((requestContext) =>
-      createServer(env, requestContext.authInfo?.scopes.includes("mcp") ?? false));
+      createServer(env, hasMcpAuthorizationScope(requestContext.authInfo?.scopes)));
     return handler(request, env, context);
   },
 } satisfies Pick<Required<ExportedHandler<Env>>, "fetch">;
