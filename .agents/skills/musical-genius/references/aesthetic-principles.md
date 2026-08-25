@@ -21,7 +21,7 @@ surprises interpretable as revisions of those regularities.
 ## Groove as expectation plus deviation
 
 Research on groove reports an inverted-U relation between rhythmic complexity
-and the pleasurable urge to move. Meter familiarity changes where that optimum
+and the pleasurable urge to move. Metre familiarity changes where that optimum
 lies: unfamiliar or asymmetric metres often require simpler surface rhythms.
 
 **Compositional implication:** preserve a perceptible beat and grouping
