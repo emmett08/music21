@@ -40,8 +40,19 @@ Adds `outputFormat`, one of `svg`, `png`, or `pdf`. LilyPond runs with fixed arg
 without a shell, in a server-created temporary directory. Binary output is base64; the
 response includes its media type and byte size.
 
+### `render_audio`
+
+Adds `outputFormat`, either `wav` or `mp3`. The backend converts the parsed score to MIDI,
+synthesises it with a server-selected General MIDI soundfont, then normalises and encodes it
+with fixed FFmpeg arguments. The caller cannot supply a soundfont, codec, filter, executable,
+path or URL.
+
+WAV responses use `audio/wav`; MP3 responses use `audio/mpeg`. Both are base64 resources and
+include their byte size. Audio is limited to 16 MiB after encoding and each external process
+has a hard timeout.
+
 ## Errors
 
 Validation errors are returned as tool errors with no score content echoed. Backend timeouts,
 size ceilings and unavailable-container errors use stable, non-sensitive messages. Diagnostic
-output is bounded and must not contain local paths or secrets.
+output is discarded and must not contain local paths, score source or secrets.

@@ -12,7 +12,10 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from backend.audio import audio_health_status
+from backend.audio import render_audio
 from backend.models import AnalyseRequest
+from backend.models import AudioRequest
 from backend.models import ConvertRequest
 from backend.models import RenderRequest
 from backend.models import ScoreRequest
@@ -66,7 +69,9 @@ async def validation_error_handler(
 
 @app.get('/health')
 def health() -> dict:
-    return {'ok': True, 'data': health_status()}
+    data = health_status()
+    data['audio'] = audio_health_status()
+    return {'ok': True, 'data': data}
 
 
 @app.post('/v1/inspect')
@@ -99,3 +104,10 @@ def convert(request: ConvertRequest) -> dict:
 def render(request: RenderRequest) -> dict:
     parsed = parse_score(request.source, request.input_format)
     return {'ok': True, 'data': render_score(parsed, request.output_format)}
+
+
+@app.post('/v1/audio')
+def audio(request: AudioRequest) -> dict:
+    parsed = parse_score(request.source, request.input_format)
+    artifact = render_audio(parsed, request.output_format)
+    return {'ok': True, 'data': {'artifact': artifact}}

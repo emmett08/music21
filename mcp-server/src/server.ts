@@ -22,6 +22,7 @@ const inputFormat = z
   .describe("Format of the inline score source; file paths and URLs are not accepted.");
 const outputFormat = z.enum(["musicxml", "midi", "lilypond"]);
 const renderFormat = z.enum(["svg", "png", "pdf"]);
+const audioFormat = z.enum(["wav", "mp3"]);
 const source = z
   .string()
   .min(1)
@@ -206,6 +207,22 @@ function createServer(env: Env, hasMcpScope: boolean): McpServer {
     },
     async ({ inputFormat: format, outputFormat: output, source: score }) =>
       invoke(env, hasMcpScope, "/v1/render", {
+        inputFormat: format,
+        outputFormat: output,
+        source: score,
+      }),
+  );
+
+  server.registerTool(
+    "render_audio",
+    {
+      annotations: readOnlyAnnotations,
+      description:
+        "Render an inline score as normalised WAV or MP3 audio with a fixed soundfont.",
+      inputSchema: z.object({ inputFormat, outputFormat: audioFormat, source }).strict(),
+    },
+    async ({ inputFormat: format, outputFormat: output, source: score }) =>
+      invoke(env, hasMcpScope, "/v1/audio", {
         inputFormat: format,
         outputFormat: output,
         source: score,

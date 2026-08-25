@@ -17,6 +17,7 @@ MAX_SOURCE_BYTES = 256 * 1024
 MAX_ELEMENTS = 10_000
 MAX_PARTS = 64
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+MAX_AUDIO_OUTPUT_BYTES = 16 * 1024 * 1024
 MAX_RENDER_PAGES = 16
 MAX_XML_NODES = 50_000
 MAX_XML_DEPTH = 128
@@ -45,6 +46,11 @@ class RenderFormat(StrEnum):
     SVG = 'svg'
     PNG = 'png'
     PDF = 'pdf'
+
+
+class AudioFormat(StrEnum):
+    WAV = 'wav'
+    MP3 = 'mp3'
 
 
 class RequestModel(BaseModel):
@@ -121,6 +127,10 @@ class ConvertRequest(ScoreRequest):
 
 class RenderRequest(ScoreRequest):
     output_format: RenderFormat = Field(alias='outputFormat')
+
+
+class AudioRequest(ScoreRequest):
+    output_format: AudioFormat = Field(alias='outputFormat')
 
 
 class GeneratedArtifact(BaseModel):

@@ -7,18 +7,25 @@ also install server or Cloudflare dependencies.
 The deployment has two layers:
 
 1. A stateless Cloudflare Worker terminates OAuth and the MCP Streamable HTTP transport.
-2. A private Cloudflare Container runs CPython, this checkout of music21, and LilyPond.
+2. A private Cloudflare Container runs CPython, this checkout of music21, LilyPond,
+   FluidSynth and FFmpeg.
 
-The Worker never accepts Python expressions, filesystem paths, URLs, or arbitrary music21
-method names. See [the tool contract](docs/tools.md) and [the security model](docs/security.md).
+The Worker never accepts Python expressions, filesystem paths, URLs, raw LilyPond or
+arbitrary music21 method names. See [the tool contract](docs/tools.md),
+[the audio renderer](docs/audio.md) and [the security model](docs/security.md).
 
 The deployable package includes:
 
 - a Cloudflare Worker with OAuth 2.1 discovery, consent, PKCE and the stateless MCP endpoint;
-- a private Cloudflare Container wrapper for CPython, this checkout of music21 and LilyPond;
-- five bounded tools for inspection, analysis, transposition, conversion and rendering;
-- a reproducible Node dependency lock, Python dependency pins, tests and a GitHub Actions workflow;
-- a Wrangler configuration plus step-by-step Access, secret, deployment and ChatGPT setup notes.
+- a private Cloudflare Container wrapper for CPython, this checkout of music21 and the fixed
+  notation and audio renderers;
+- six bounded tools for inspection, analysis, transposition, conversion, notation rendering
+  and audio rendering;
+- PDF, SVG and PNG score output plus WAV and MP3 audio output;
+- a reproducible Node dependency lock, Python dependency pins, tests and GitHub Actions
+  workflows;
+- a Wrangler configuration plus step-by-step Access, secret, deployment and ChatGPT setup
+  notes.
 
 ## Requirements
 
@@ -36,6 +43,7 @@ From the repository root:
 uv sync --locked
 uv pip install --requirement mcp-server/backend/requirements.txt
 uv run pytest mcp-server/backend/tests
+python .agents/skills/musical-genius/scripts/validate_skill.py
 
 cd mcp-server
 npm ci --ignore-scripts
@@ -67,3 +75,7 @@ Cloudflare account, a Workers Paid plan and the account-specific Access applicat
 Version 1 is stateless: each tool receives the score source it operates on. This avoids
 cross-user score storage and keeps authorisation easy to audit. Opaque score handles and R2
 artefact storage can be added later without changing the existing tools.
+
+Audio synthesis uses one server-selected General MIDI soundfont. The caller can select WAV
+or MP3 but cannot select executables, codecs, filters, files or soundfonts. See
+[the audio notice](docs/audio.md) before redistributing generated waveforms.

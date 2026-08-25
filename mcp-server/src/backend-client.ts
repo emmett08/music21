@@ -1,9 +1,10 @@
-export const BACKEND_TIMEOUT_MS = 45_000;
-export const MAX_BACKEND_RESPONSE_BYTES = 3 * 1024 * 1024;
+export const BACKEND_TIMEOUT_MS = 75_000;
+export const MAX_BACKEND_RESPONSE_BYTES = 24 * 1024 * 1024;
 export const MAX_SOURCE_CHARACTERS = 256 * 1024;
 
 export type BackendEndpoint =
   | "/v1/analyse"
+  | "/v1/audio"
   | "/v1/convert"
   | "/v1/inspect"
   | "/v1/render"
