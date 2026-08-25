@@ -19,7 +19,12 @@ Object.assign(globalThis, {
   Cloudflare: { compatibilityFlags: { global_fetch_strictly_public: true } },
 });
 
-const { accessAuthHandler, allowedEmailSet } = await import("./access-auth.ts");
+const {
+  accessAuthHandler,
+  allowedEmailSet,
+  grantedAuthorizationScopes,
+  hasMcpAuthorizationScope,
+} = await import("./access-auth.ts");
 const { AuthorizationError } = await import("@cloudflare/workers-oauth-provider");
 
 const oauthRequest = {
@@ -151,6 +156,19 @@ test("rejects wildcards and malformed identities", () => {
   assert.throws(() => allowedEmailSet("not-an-email"), /ALLOWED_EMAILS/);
 });
 
+test("grants mcp when the authorize request omits scope", () => {
+  assert.deepEqual(grantedAuthorizationScopes([]), ["mcp"]);
+  assert.deepEqual(grantedAuthorizationScopes(["offline_access"]), ["mcp", "offline_access"]);
+  assert.deepEqual(grantedAuthorizationScopes(["mcp", "music:read"]), ["mcp"]);
+});
+
+test("treats an omitted or empty token scope as mcp", () => {
+  assert.equal(hasMcpAuthorizationScope(undefined), true);
+  assert.equal(hasMcpAuthorizationScope([]), true);
+  assert.equal(hasMcpAuthorizationScope(["mcp"]), true);
+  assert.equal(hasMcpAuthorizationScope(["offline_access"]), false);
+});
+
 test("renders an AuthorizationError locally when no redirect URI was validated", async () => {
   const env = testEnvironment();
   env.OAUTH_PROVIDER.parseAuthRequest = async () => {
@@ -195,6 +213,19 @@ test("redirects an AuthorizationError only after provider redirect validation", 
   assert.equal(destination.searchParams.get("iss"), "https://mcp.example.test");
 });
 
+test("consent lists mcp when ChatGPT omits the scope parameter", async () => {
+  const env = testEnvironment();
+  env.OAUTH_PROVIDER.parseAuthRequest = async () => ({
+    ...structuredClone(oauthRequest),
+    scope: [],
+  });
+
+  const fixture = await consentFixture(env);
+  assert.equal(fixture.response.status, 200);
+  assert.match(fixture.html, /<code>mcp<\/code>/);
+  assert.doesNotMatch(fixture.html, /No additional scopes requested/);
+});
+
 test("renders escaped consent metadata with a hardened CSRF cookie", async () => {
   const env = testEnvironment();
   const fixture = await consentFixture(env);
@@ -210,7 +241,8 @@ test("renders escaped consent metadata with a hardened CSRF cookie", async () =>
   );
   assert.match(fixture.html, /<style>/);
   assert.match(fixture.html, /&lt;Music &amp; Theory&gt;/);
-  assert.match(fixture.html, /music:read&amp;write/);
+  assert.match(fixture.html, /<code>mcp<\/code>/);
+  assert.doesNotMatch(fixture.html, /music:read&amp;write/);
   assert.doesNotMatch(fixture.html, /<script/i);
   assert.equal(fixture.csrfCookie, fixture.csrfToken);
   const cookie = setCookies(fixture.response)[0];

@@ -8,9 +8,11 @@ public use.
 - Cloudflare Access authenticates the human user.
 - The Worker verifies the upstream identity, restricts it to `ALLOWED_EMAILS`, and issues the
   short-lived OAuth credentials used by the MCP client.
-- The authorisation page displays the registered client and requested scopes. One-time KV
-  state, a hardened `__Host-` CSRF cookie, PKCE and a separate browser-binding cookie prevent
-  consent and login-CSRF flows from being replayed in another browser.
+- The authorisation page displays the registered client and the scopes Approve will grant.
+  Clients that omit `scope` still receive `mcp`; `offline_access` is added only when requested.
+  Tokens with an empty scope list are treated as that default grant. One-time KV state, a
+  hardened `__Host-` CSRF cookie, PKCE and a separate browser-binding cookie prevent consent
+  and login-CSRF flows from being replayed in another browser.
 - Only the Worker can address the backend Container Durable Object.
 - The container receives score data but no Cloudflare or Access credentials, and its public
   internet access is disabled.

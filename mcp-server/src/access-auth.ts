@@ -21,6 +21,7 @@ const MAX_SCOPE_LENGTH = 256;
 const UPSTREAM_FETCH_TIMEOUT_MS = 15_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 128 * 1024;
 const CLOCK_SKEW_SECONDS = 60;
+const MCP_SCOPE = "mcp";
 
 interface AuthConfig {
   allowedEmails: ReadonlySet<string>;
@@ -117,6 +118,19 @@ export function allowedEmailSet(value: string): ReadonlySet<string> {
   return new Set(emails);
 }
 
+/** Approve always grants `mcp`. `offline_access` is added only when requested. */
+export function grantedAuthorizationScopes(requested: readonly string[]): string[] {
+  const granted = new Set<string>([MCP_SCOPE]);
+  if (requested.includes("offline_access")) {
+    granted.add("offline_access");
+  }
+  return [...granted];
+}
+
+export function hasMcpAuthorizationScope(scopes: readonly string[] | undefined): boolean {
+  return scopes === undefined || scopes.length === 0 || scopes.includes(MCP_SCOPE);
+}
+
 async function showAuthorizationConsent(
   request: Request,
   env: OAuthEnvironment,
@@ -164,7 +178,7 @@ async function showAuthorizationConsent(
 
   return consentPageResponse(
     clientName,
-    oauthRequest.scope,
+    grantedAuthorizationScopes(oauthRequest.scope),
     consentState,
     csrfToken,
     config.authorizationUrl.origin,
@@ -302,7 +316,7 @@ async function completeAccessAuthorization(
       metadata: { label: email },
       props,
       request: stored.oauthRequest,
-      scope: stored.oauthRequest.scope,
+      scope: grantedAuthorizationScopes(stored.oauthRequest.scope),
       userId: sub,
     });
     return redirectResponse(new URL(redirectTo), [clearCookie(ACCESS_STATE_COOKIE)]);
@@ -513,7 +527,7 @@ function consentPageResponse(
   <main>
     <h1>Authorize ${escapedName}?</h1>
     <p>This application is requesting access to the music21 MCP server.</p>
-    <h2>Requested permissions</h2>
+    <h2>Permissions</h2>
     <ul>${scopeItems}</ul>
     <form action="/authorize" method="post" autocomplete="off">
       <input type="hidden" name="consent_state" value="${escapeHtml(consentState)}">
