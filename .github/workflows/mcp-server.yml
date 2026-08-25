@@ -89,7 +89,7 @@ jobs:
             - uses: actions/checkout@v4
             - name: Build Linux/AMD64 image
               run: docker build --platform linux/amd64 --file Dockerfile.mcp --tag music21-mcp:test .
-            - name: Exercise container health, parsing, notation and audio
+            - name: Exercise container health, parsing, PDF, WAV and MP3
               run: |
                   docker run --detach --name music21-mcp-test --publish 8080:8080 music21-mcp:test
                   trap 'docker logs music21-mcp-test; docker rm --force music21-mcp-test' EXIT
@@ -111,23 +111,51 @@ jobs:
                   python -c 'import json; data=json.load(open("/tmp/inspect.json")); assert data["ok"] is True; assert data["data"]["noteCount"] == 4'
                   curl --fail --silent \
                       --header 'Content-Type: application/json' \
-                      --data '{"source":"tinyNotation: 4/4 C4 D4 E4 F4","inputFormat":"tiny_notation","outputFormat":"svg"}' \
-                      http://127.0.0.1:8080/v1/render >/tmp/render.json
-                  python -c 'import json; data=json.load(open("/tmp/render.json")); assert data["ok"] is True; assert data["data"]["pageCount"] >= 1; artifact=data["data"]["artifacts"][0]; assert artifact["contentType"] == "image/svg+xml"; assert "<svg" in artifact["content"]'
-                  curl --fail --silent \
-                      --header 'Content-Type: application/json' \
-                      --data '{"source":"tinyNotation: 4/4 C4 D4 E4 F4","inputFormat":"tiny_notation","outputFormat":"mp3"}' \
-                      http://127.0.0.1:8080/v1/audio >/tmp/audio.json
+                      --data '{"source":"tinyNotation: 4/4 C4 D4 E4 F4","inputFormat":"tiny_notation","outputFormat":"pdf"}' \
+                      http://127.0.0.1:8080/v1/render >/tmp/score-pdf.json
                   python - <<'PY'
                   import base64
                   import json
 
-                  data = json.load(open('/tmp/audio.json'))
+                  data = json.load(open('/tmp/score-pdf.json'))
+                  assert data['ok'] is True
+                  assert data['data']['pageCount'] == 1
+                  artifact = data['data']['artifacts'][0]
+                  decoded = base64.b64decode(artifact['content'])
+                  assert artifact['outputFormat'] == 'pdf'
+                  assert artifact['contentType'] == 'application/pdf'
+                  assert artifact['encoding'] == 'base64'
+                  assert artifact['size'] == len(decoded)
+                  assert decoded.startswith(b'%PDF-')
+                  PY
+                  for format in wav mp3; do
+                      curl --fail --silent \
+                          --header 'Content-Type: application/json' \
+                          --data "{\"source\":\"tinyNotation: 4/4 C4 D4 E4 F4\",\"inputFormat\":\"tiny_notation\",\"outputFormat\":\"$format\"}" \
+                          http://127.0.0.1:8080/v1/audio >"/tmp/score-$format.json"
+                      python - "$format" <<'PY'
+                  import base64
+                  import json
+                  from pathlib import Path
+                  import sys
+
+                  output_format = sys.argv[1]
+                  data = json.loads(Path(f'/tmp/score-{output_format}.json').read_text())
                   assert data['ok'] is True
                   artifact = data['data']['artifact']
                   decoded = base64.b64decode(artifact['content'])
-                  assert artifact['contentType'] == 'audio/mpeg'
+                  expected_type = 'audio/wav' if output_format == 'wav' else 'audio/mpeg'
+                  assert artifact['outputFormat'] == output_format
+                  assert artifact['contentType'] == expected_type
                   assert artifact['encoding'] == 'base64'
                   assert artifact['size'] == len(decoded)
                   assert len(decoded) > 1_000
+                  if output_format == 'wav':
+                      assert decoded.startswith(b'RIFF')
+                      assert decoded[8:12] == b'WAVE'
+                  else:
+                      assert decoded.startswith(b'ID3') or (
+                          decoded[0] == 0xff and decoded[1] & 0xe0 == 0xe0
+                      )
                   PY
+                  done
